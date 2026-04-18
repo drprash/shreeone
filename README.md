@@ -31,14 +31,32 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 
 ## Features
 
-- **Multi-account tracking** — bank accounts, credit cards, wallets, savings
+- **Multi-account tracking** — bank accounts, credit cards, wallets, savings across multiple countries and currencies
 - **Income & expense categorisation** with custom categories per family
+- **Financial Goals** — savings targets, big purchases, debt payoff, net-worth milestones; manual contributions with history or auto-tracked via a linked account
 - **Budget settings** — monthly limits per category with alerts
 - **Recurring payments** — subscriptions, EMIs, SIPs auto-posted at midnight daily
+- **Net Worth timeline** — daily snapshots charted on the Dashboard
 - **Role-based access** — Admin, Member, Viewer with granular permission overrides
 - **Transaction privacy** — Private / Shared / Family visibility per entry
 - **Passkey / WebAuthn** — passwordless login alongside JWT
 - **Offline-first PWA** — IndexedDB queue, auto-sync on reconnect; installable on Android
+- **Backup & Restore** — HMAC-signed JSON export/import covering all data including goals and AI preferences
+
+### Local AI (optional)
+
+All inference runs on-device — no data leaves your server.
+
+| Feature | Description |
+|---|---|
+| **Auto-categorisation** | Suggests a category for each transaction as you type |
+| **Voice / Smart Entry** | Speak or type a sentence ("spent £45 at Tesco") — fields auto-fill |
+| **Receipt OCR** | Photograph a receipt; amount, merchant, date extracted automatically |
+| **Bank Statement Import** | Upload a PDF or image statement; expense rows parsed into transactions |
+| **Monthly Narrative** | 3–4 sentence plain-English summary of the family's monthly finances |
+| **Weekly Digest** | 2-sentence spending summary shown on the Dashboard |
+
+AI features can be toggled individually in **Settings → Preferences → AI Features**.
 
 ## Tech Stack
 
@@ -49,6 +67,8 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 | Auth | JWT (30 min access / 7 day refresh) + WebAuthn passkeys |
 | Database | PostgreSQL 16 |
 | Scheduler | APScheduler (recurring payments at 00:00, token pruning at 01:00, exchange rates at 06:00) |
+| Local AI | Ollama + Gemma 4 E4B (~4.7 GB, pulled automatically) |
+| PDF/OCR | pdfplumber (text PDFs), pymupdf (scanned image fallback) |
 | Infrastructure | Docker + Docker Compose, Nginx |
 
 ## Prerequisites
@@ -74,12 +94,13 @@ The script will:
    - `DB_PASSWORD` — auto-generate or enter your own
    - `SECRET_KEY` — auto-generate (64 hex chars) or enter your own (min 32 chars)
    - `FRONTEND_URL` — choose localhost, your detected LAN IP, or a custom URL
-3. **Build and start all services** — runs `docker compose up -d --build`.
-4. **Health check** — polls the API until it responds, then prints the app URL.
+3. **Optionally enable AI features** — Ollama pulls the Gemma 4 E4B model (~4.7 GB) automatically on first start. The app works fully without AI; you can enable it later.
+4. **Build and start all services** — runs `docker compose up -d --build` (or the AI variant).
+5. **Health check** — polls the API until it responds, then prints the app URL.
 
 Open the printed URL and register the first admin account. The first user to register automatically becomes the family Admin and creates the family — no separate setup step is needed.
 
-### Option B — Manual setup
+### Option B — Manual setup (core, no AI)
 
 ```bash
 git clone https://github.com/drprash/shreeone.git shreeone && cd shreeone
@@ -107,6 +128,14 @@ Open `http://localhost:5173` and register the first admin account. The first use
 
 **Verify:** `curl http://localhost:5173/api/health`
 
+### Option C — Manual setup with AI
+
+```bash
+docker compose -f docker-compose.ai.yml up -d --build
+```
+
+The `docker-compose.ai.yml` adds an `llm` service (Ollama) alongside the core `db`, `backend`, and `frontend` services. Ollama pulls `gemma4:e4b` automatically on first start (~4.7 GB). The backend connects via `LLM_BASE_URL`.
+
 ### Accessing from other devices on your LAN
 
 The installer detects your LAN IP and offers it as a one-step option. For manual setup:
@@ -131,6 +160,9 @@ Open Chrome → navigate to the app URL → three-dot menu → **Add to Home scr
 | `FRONTEND_URL` | Yes | `http://localhost:5173` | Base URL of the app; used for CORS and WebAuthn origin/RP-ID validation. Comma-separate multiple origins for CORS (e.g. `http://localhost:5173,http://192.168.1.10:5173`). |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` | JWT access token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | JWT refresh token lifetime |
+| `LLM_BASE_URL` | No | `http://llm:11434` | Ollama server URL (AI features) |
+| `LLM_MODEL` | No | `gemma4:e4b` | Ollama model name |
+| `LLM_TIMEOUT_SECONDS` | No | `90` | LLM inference timeout in seconds |
 
 ## Upgrading
 
@@ -161,29 +193,56 @@ gunzip -c backups/shreeone_backup_YYYYMMDD_HHMMSS.sql.gz \
 shreeone/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py        # FastAPI app, scheduler, CORS
-│   │   ├── models.py      # SQLAlchemy models (14 tables)
+│   │   ├── main.py             # FastAPI app, scheduler, CORS, DB migrations
+│   │   ├── models.py           # SQLAlchemy models
+│   │   ├── schemas.py          # Pydantic request/response schemas
 │   │   ├── crud.py
-│   │   ├── auth.py        # JWT + WebAuthn
+│   │   ├── auth.py             # JWT + WebAuthn
+│   │   ├── financial_logic.py  # Balance calculations, exchange rate engine
 │   │   ├── config.py
-│   │   └── routers/       # auth, accounts, transactions, categories, dashboard, settings, sync, admin
+│   │   └── routers/
+│   │       ├── ai.py           # AI endpoints (categorise, receipt, voice, statement, narrative)
+│   │       ├── goals.py        # Financial goals + contributions
+│   │       ├── accounts.py
+│   │       ├── transactions.py
+│   │       ├── categories.py
+│   │       ├── dashboard.py
+│   │       ├── settings.py
+│   │       ├── backup.py       # Backup & restore
+│   │       └── ...
+│   ├── services/
+│   │   └── ai_service.py       # Ollama HTTP client (categorise, OCR, voice, narrative)
 │   ├── tests/
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── Transactions.jsx
+│   │   │   ├── Accounts.jsx
+│   │   │   ├── Goals.jsx
+│   │   │   ├── Settings.jsx
+│   │   │   └── ...
 │   │   ├── components/
-│   │   ├── services/      # Axios API client, WebAuthn
-│   │   ├── store/         # Zustand (auth, theme)
-│   │   └── lib/           # IndexedDB offline queue
+│   │   │   ├── Dashboard/NetWorthChart.jsx
+│   │   │   ├── Transactions/QuickAdd.jsx   # voice / smart-entry
+│   │   │   └── Settings/
+│   │   ├── services/
+│   │   │   ├── aiAPI.js        # AI feature calls
+│   │   │   ├── goalsAPI.js
+│   │   │   └── ...
+│   │   ├── store/              # Zustand (auth, theme)
+│   │   └── lib/               # IndexedDB offline queue
 │   ├── public/
 │   ├── nginx.conf
 │   ├── package.json
 │   └── Dockerfile
-├── scripts/backup.sh
-├── docker-compose.yml
-├── install.sh             # automated one-step installer
+├── scripts/
+│   └── backup.sh
+├── docker-compose.yml          # Core stack (db, backend, frontend)
+├── docker-compose.ai.yml       # Full stack with local AI (adds Ollama service)
+├── install.sh                  # automated one-step installer
 └── .env.example
 ```
 

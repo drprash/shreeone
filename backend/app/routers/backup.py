@@ -19,7 +19,6 @@ from app.database import get_db
 router = APIRouter(prefix="/admin/backup", tags=["Backup & Restore"])
 
 
-# ── Serialization ─────────────────────────────────────────────────────────────
 
 def _val(v: Any) -> Any:
     if isinstance(v, UUID):
@@ -37,7 +36,6 @@ def _row(obj) -> dict:
     return {col.name: _val(getattr(obj, col.name)) for col in obj.__table__.columns}
 
 
-# ── HMAC helpers ──────────────────────────────────────────────────────────────
 
 def _sign(payload: dict) -> str:
     data = json.dumps(payload, sort_keys=True, default=str).encode()
@@ -48,7 +46,6 @@ def _verify(payload: dict, sig: str) -> bool:
     return hmac.compare_digest(_sign(payload), sig)
 
 
-# ── Preview ───────────────────────────────────────────────────────────────────
 
 @router.get("/preview")
 def backup_preview(
@@ -75,6 +72,12 @@ def backup_preview(
             "categories": db.query(models.Category).filter(
                 models.Category.family_id == fid, models.Category.deleted_at.is_(None)
             ).count(),
+            "goals": db.query(models.Goal).filter(
+                models.Goal.family_id == fid, models.Goal.archived_at.is_(None)
+            ).count(),
+            "goal_contributions": db.query(models.GoalContribution).join(
+                models.Goal, models.GoalContribution.goal_id == models.Goal.id
+            ).filter(models.Goal.family_id == fid).count(),
             "member_permissions": db.query(models.MemberPermission).filter(
                 models.MemberPermission.family_id == fid
             ).count(),
@@ -103,7 +106,6 @@ def backup_preview(
     }
 
 
-# ── Create backup ─────────────────────────────────────────────────────────────
 
 @router.post("")
 def create_backup(
@@ -127,7 +129,6 @@ def create_backup(
     fid = current_user.family_id
     account_ids_sq = db.query(models.Account.id).filter(models.Account.family_id == fid)
 
-    # ── Core (always) ─────────────────────────────────────────────────────────
     family = db.query(models.Family).filter(models.Family.id == fid).first()
     users = db.query(models.User).filter(
         models.User.family_id == fid, models.User.deleted_at.is_(None)
@@ -151,6 +152,12 @@ def create_backup(
     family_currencies = db.query(models.FamilyCurrency).filter(
         models.FamilyCurrency.family_id == fid
     ).all()
+    goals = db.query(models.Goal).filter(
+        models.Goal.family_id == fid, models.Goal.archived_at.is_(None)
+    ).all()
+    goal_contributions = db.query(models.GoalContribution).join(
+        models.Goal, models.GoalContribution.goal_id == models.Goal.id
+    ).filter(models.Goal.family_id == fid).all()
 
     included_modules = ["core"]
     payload: dict = {
@@ -162,9 +169,10 @@ def create_backup(
         "member_permissions": [_row(p) for p in member_permissions],
         "family_preference": _row(family_preference) if family_preference else None,
         "family_currencies": [_row(fc) for fc in family_currencies],
+        "goals": [_row(g) for g in goals],
+        "goal_contributions": [_row(gc) for gc in goal_contributions],
     }
 
-    # ── Optional: automation ──────────────────────────────────────────────────
     if include_automation:
         included_modules.append("automation")
         payload["recurring_payments"] = [
@@ -178,7 +186,6 @@ def create_backup(
             ).all()
         ]
 
-    # ── Optional: exchange rates ──────────────────────────────────────────────
     if include_exchange_rates:
         included_modules.append("exchange_rates")
         payload["exchange_rates"] = [
@@ -187,7 +194,6 @@ def create_backup(
             ).all()
         ]
 
-    # ── Optional: audit logs ──────────────────────────────────────────────────
     if include_audit_logs:
         included_modules.append("audit_logs")
         user_ids_sq = db.query(models.User.id).filter(models.User.family_id == fid)
@@ -234,7 +240,6 @@ def create_backup(
     )
 
 
-# ── Restore ───────────────────────────────────────────────────────────────────
 
 @router.post("/restore")
 async def restore_backup(
@@ -301,7 +306,7 @@ async def restore_backup(
     )
 
     try:
-        # ── Wipe existing family data (reverse FK order) ──────────────────────
+        # wipe in reverse FK order
         live_account_ids = [
             r[0] for r in db.query(models.Account.id).filter(
                 models.Account.family_id == fid
@@ -355,6 +360,19 @@ async def restore_backup(
                 models.RefreshToken.user_id.in_(live_user_ids)
             ).delete(synchronize_session=False)
 
+        live_goal_ids = [
+            r[0] for r in db.query(models.Goal.id).filter(
+                models.Goal.family_id == fid
+            ).all()
+        ]
+        if live_goal_ids:
+            db.query(models.GoalContribution).filter(
+                models.GoalContribution.goal_id.in_(live_goal_ids)
+            ).delete(synchronize_session=False)
+        db.query(models.Goal).filter(
+            models.Goal.family_id == fid
+        ).delete(synchronize_session=False)
+
         db.query(models.Account).filter(
             models.Account.family_id == fid
         ).delete(synchronize_session=False)
@@ -376,7 +394,7 @@ async def restore_backup(
 
         db.flush()
 
-        # ── Re-insert core ────────────────────────────────────────────────────
+        # re-insert
 
         # Users — password_hash intentionally excluded; users must reset passwords
         for u in payload["users"]:
@@ -398,16 +416,19 @@ async def restore_backup(
             db.execute(text("""
                 INSERT INTO accounts (id, family_id, name, type, currency, owner_type,
                                       owner_user_id, include_in_family_overview,
-                                      opening_balance, current_balance, country_code,
+                                      opening_balance, current_balance, current_value,
+                                      last_valued_at, country_code,
                                       sort_order, created_at, updated_at, deleted_at)
                 VALUES (:id, :family_id, :name, :type, :currency, :owner_type,
                         :owner_user_id, :include_in_family_overview,
-                        :opening_balance, :current_balance, :country_code,
+                        :opening_balance, :current_balance, :current_value,
+                        :last_valued_at, :country_code,
                         :sort_order, :created_at, :updated_at, :deleted_at)
             """), {k: a.get(k) for k in [
                 "id", "family_id", "name", "type", "currency", "owner_type",
                 "owner_user_id", "include_in_family_overview",
-                "opening_balance", "current_balance", "country_code",
+                "opening_balance", "current_balance", "current_value",
+                "last_valued_at", "country_code",
                 "sort_order", "created_at", "updated_at", "deleted_at",
             ]})
 
@@ -482,15 +503,30 @@ async def restore_backup(
             fp = payload["family_preference"]
             db.execute(text("""
                 INSERT INTO family_preferences (id, family_id, theme, language,
-                    allow_member_invites, allow_transaction_sharing, show_budget_alerts,
-                    two_factor_enabled, created_at, updated_at)
+                    show_budget_alerts, two_factor_enabled,
+                    show_net_worth_by_country, show_member_spending,
+                    ai_categorization_enabled, ai_monthly_narrative_enabled,
+                    ai_weekly_digest_enabled, ai_receipt_ocr_enabled,
+                    ai_voice_entry_enabled, ai_statement_upload_enabled,
+                    ai_provider, ai_model_override,
+                    created_at, updated_at)
                 VALUES (:id, :family_id, :theme, :language,
-                    :allow_member_invites, :allow_transaction_sharing, :show_budget_alerts,
-                    :two_factor_enabled, :created_at, :updated_at)
+                    :show_budget_alerts, :two_factor_enabled,
+                    :show_net_worth_by_country, :show_member_spending,
+                    :ai_categorization_enabled, :ai_monthly_narrative_enabled,
+                    :ai_weekly_digest_enabled, :ai_receipt_ocr_enabled,
+                    :ai_voice_entry_enabled, :ai_statement_upload_enabled,
+                    :ai_provider, :ai_model_override,
+                    :created_at, :updated_at)
             """), {k: fp.get(k) for k in [
                 "id", "family_id", "theme", "language",
-                "allow_member_invites", "allow_transaction_sharing", "show_budget_alerts",
-                "two_factor_enabled", "created_at", "updated_at",
+                "show_budget_alerts", "two_factor_enabled",
+                "show_net_worth_by_country", "show_member_spending",
+                "ai_categorization_enabled", "ai_monthly_narrative_enabled",
+                "ai_weekly_digest_enabled", "ai_receipt_ocr_enabled",
+                "ai_voice_entry_enabled", "ai_statement_upload_enabled",
+                "ai_provider", "ai_model_override",
+                "created_at", "updated_at",
             ]})
 
         # Family currencies
@@ -501,7 +537,30 @@ async def restore_backup(
                 ON CONFLICT ON CONSTRAINT uq_family_currency DO NOTHING
             """), {k: fc.get(k) for k in ["id", "family_id", "currency_code", "added_at"]})
 
-        # ── Optional: automation ──────────────────────────────────────────────
+        # Goals
+        for g in payload.get("goals", []):
+            db.execute(text("""
+                INSERT INTO goals (id, family_id, name, type, target_amount, current_amount,
+                    currency, target_date, linked_account_id, notes,
+                    created_at, updated_at, archived_at)
+                VALUES (:id, :family_id, :name, :type, :target_amount, :current_amount,
+                    :currency, :target_date, :linked_account_id, :notes,
+                    :created_at, :updated_at, :archived_at)
+            """), {k: g.get(k) for k in [
+                "id", "family_id", "name", "type", "target_amount", "current_amount",
+                "currency", "target_date", "linked_account_id", "notes",
+                "created_at", "updated_at", "archived_at",
+            ]})
+
+        # Goal contributions
+        for gc in payload.get("goal_contributions", []):
+            db.execute(text("""
+                INSERT INTO goal_contributions (id, goal_id, amount, note, contributed_at, created_at)
+                VALUES (:id, :goal_id, :amount, :note, :contributed_at, :created_at)
+            """), {k: gc.get(k) for k in [
+                "id", "goal_id", "amount", "note", "contributed_at", "created_at",
+            ]})
+
         if "automation" in included_modules:
             for r in payload.get("recurring_payments", []):
                 db.execute(text("""
@@ -535,7 +594,6 @@ async def restore_backup(
                     "created_at", "updated_at",
                 ]})
 
-        # ── Optional: exchange rates ──────────────────────────────────────────
         if "exchange_rates" in included_modules:
             for er in payload.get("exchange_rates", []):
                 db.execute(text("""
@@ -549,7 +607,6 @@ async def restore_backup(
                     "rate", "source", "valid_date", "fetched_at",
                 ]})
 
-        # ── Optional: audit logs ──────────────────────────────────────────────
         if "audit_logs" in included_modules:
             for al in payload.get("audit_logs", []):
                 db.execute(text("""

@@ -3,7 +3,8 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import OfflineBanner from '../components/OfflineBanner';
 import CacheWarmer from '../components/CacheWarmer';
-import { LayoutDashboard, Wallet, List, Tags, Settings, LogOut, Menu, X } from 'lucide-react';
+import OnboardingTour from '../components/Onboarding/OnboardingTour';
+import { LayoutDashboard, Wallet, List, Tags, Settings, LogOut, Menu, X, Target } from 'lucide-react';
 
 const MainLayout = () => {
   const { user, clearAuth } = useAuthStore();
@@ -16,6 +17,7 @@ const MainLayout = () => {
     { name: 'Accounts', href: '/accounts', icon: Wallet },
     { name: 'Transactions', href: '/transactions', icon: List },
     { name: 'Categories', href: '/categories', icon: Tags },
+    { name: 'Goals', href: '/goals', icon: Target },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
@@ -111,6 +113,7 @@ const MainLayout = () => {
       </div>
 
       <CacheWarmer />
+      <OnboardingTour />
       <div className="md:ml-64 pt-16 md:pt-0">
         <OfflineBanner />
         <div className="p-4 md:p-8">

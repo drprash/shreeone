@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, ArrowRightLeft } from 'lucide-react';
+import { Plus, ArrowRightLeft, Camera, Mic, MicOff, Sparkles } from 'lucide-react';
 import { formatDateForInput, parseDateForPicker, toNaiveDateTimeString } from '../../utils/dateUtils';
 import { formatAccountDisplayName, formatCurrency } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 import { useCreateTransaction } from '../../hooks/useCreateTransaction';
 import api from '../../services/api';
+import { useAIStatus } from '../../hooks/useAIStatus';
+import { categorizeTransaction, parseReceipt, parseVoiceTranscript } from '../../services/aiAPI';
 
 const QA_DEFAULT_RATES = { USD:1.0, EUR:1.1, GBP:1.28, INR:0.012, CAD:0.74, AUD:0.67, JPY:0.0067, AED:0.272, THB:0.028 };
 function getQAConversionRate(from, to) {
@@ -17,6 +19,18 @@ function getQAConversionRate(from, to) {
 
 const QuickAdd = ({ accounts, categories, baseCurrency }) => {
   const [isTransfer, setIsTransfer] = useState(false);
+  const aiStatus = useAIStatus();
+  const aiAvailable = aiStatus.ai_service_available;
+
+  // AI state
+  const [aiSuggestion, setAiSuggestion] = useState(null);   // { category, category_id, confidence }
+  const [isScanning, setIsScanning] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [showSmartEntry, setShowSmartEntry] = useState(false);
+  const [smartText, setSmartText] = useState('');
+  const [isParsing, setIsParsing] = useState(false);
+  const receiptInputRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   const { data: familyProfile } = useQuery({
     queryKey: ['settings', 'family-profile'],
@@ -100,7 +114,105 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
     ? (parseFloat(watchedAmount) * parseFloat(watchedRate)).toFixed(2)
     : null;
 
-  const { mutate: createTransaction, isPending } = useCreateTransaction({ onSuccess: () => reset() });
+  // Debounced category suggestion: fires 800ms after the user stops typing
+  const categorizationTimer = useRef(null);
+  const handleDescriptionChange = useCallback((description) => {
+    setAiSuggestion(null);
+    clearTimeout(categorizationTimer.current);
+    if (!aiAvailable || !aiStatus.ai_categorization_enabled || description.length < 3) return;
+    categorizationTimer.current = setTimeout(async () => {
+      try {
+        const result = await categorizeTransaction(description);
+        if (result?.category_id) setAiSuggestion(result);
+      } catch { /* silent — AI is optional */ }
+    }, 800);
+  }, [aiAvailable, aiStatus.ai_categorization_enabled]);
+
+  useEffect(() => () => clearTimeout(categorizationTimer.current), []);
+
+  // Receipt scan — opens the hidden file input
+  const handleReceiptScan = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsScanning(true);
+    try {
+      const result = await parseReceipt(file);
+      if (!result?.is_receipt) { toast.error('No receipt found in the image'); return; }
+      if (result.amount)       setValue('amount', String(result.amount));
+      if (result.description)  setValue('description', result.description);
+      if (result.currency)     setValue('tx_currency', result.currency);
+      if (result.date)         setValue('transaction_date', parseDateForPicker(result.date));
+      toast.success('Receipt scanned — please review and confirm');
+    } catch {
+      toast.error('Could not parse receipt');
+    } finally {
+      setIsScanning(false);
+      e.target.value = '';
+    }
+  };
+
+  // Parse natural language text → fill form fields
+  const parseSmartText = async (text) => {
+    if (!text.trim()) return;
+    setIsParsing(true);
+    try {
+      const result = await parseVoiceTranscript(text.trim());
+      if (!result?.is_transaction) {
+        toast('No transaction detected — try e.g. "50 pounds at Tesco"', { icon: '💬' });
+        return;
+      }
+      if (result.amount)      setValue('amount', String(result.amount));
+      if (result.description) setValue('description', result.description);
+      if (result.currency)    setValue('tx_currency', result.currency);
+      setShowSmartEntry(false);
+      setSmartText('');
+      toast.success('Parsed — please review and confirm');
+    } catch {
+      toast.error('Could not parse — is the AI service running?');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  // Voice via browser SpeechRecognition (HTTPS/localhost only) → auto-fills smart text → parses
+  const handleMicClick = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      // No SpeechRecognition — just open the smart text panel
+      setShowSmartEntry(true);
+      toast('Type your transaction in plain language and press Parse', { icon: '💬' });
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend  = () => setIsRecording(false);
+    recognition.onerror = (e) => {
+      setIsRecording(false);
+      if (e.error === 'not-allowed') toast.error('Microphone access denied');
+      else {
+        // Fall back to text panel on any other error
+        setShowSmartEntry(true);
+        toast('Voice unavailable — type your transaction instead', { icon: '💬' });
+      }
+    };
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      setSmartText(transcript);
+      setShowSmartEntry(true);
+      parseSmartText(transcript);
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const { mutate: createTransaction, isPending } = useCreateTransaction({ onSuccess: () => { reset(); setAiSuggestion(null); } });
 
   const onSubmit = (data) => {
     // Validate form data before submission
@@ -321,6 +433,20 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
         {!isTransfer && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            {aiSuggestion && (
+              <div className="flex items-center gap-2 mb-1.5 px-2 py-1 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-700">
+                <Sparkles className="w-3 h-3 shrink-0" />
+                <span>AI suggests: <strong>{aiSuggestion.category}</strong></span>
+                <button
+                  type="button"
+                  onClick={() => { setValue('category_id', aiSuggestion.category_id); setAiSuggestion(null); }}
+                  className="ml-auto px-2 py-0.5 bg-violet-600 text-white rounded text-xs hover:bg-violet-700"
+                >
+                  Accept
+                </button>
+                <button type="button" onClick={() => setAiSuggestion(null)} className="text-violet-400 hover:text-violet-600">✕</button>
+              </div>
+            )}
             <select
               {...register('category_id')}
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -411,13 +537,98 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
         })()}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-gray-700">Description</label>
+            {aiAvailable && (
+              <div className="flex gap-1">
+                {aiStatus.ai_receipt_ocr_enabled !== false && (
+                  <>
+                    <input
+                      ref={receiptInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={handleReceiptScan}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => receiptInputRef.current?.click()}
+                      disabled={isScanning}
+                      className="p-1 text-gray-400 hover:text-blue-500 disabled:opacity-50"
+                      title="Scan receipt"
+                    >
+                      <Camera className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+                {aiStatus.ai_voice_entry_enabled !== false && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleMicClick}
+                      className={`p-1 ${isRecording ? 'text-red-500 animate-pulse' : 'text-gray-400 hover:text-blue-500'}`}
+                      title={isRecording ? 'Stop recording' : 'Voice / smart entry'}
+                    >
+                      {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </button>
+                    {!isRecording && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSmartEntry(v => !v)}
+                        className="p-1 text-gray-400 hover:text-blue-500 text-xs font-medium"
+                        title="Type transaction in plain language"
+                      >
+                        NLP
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <input
             {...register('description')}
             type="text"
             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-            placeholder="What was this for?"
+            placeholder={isScanning ? 'Scanning receipt…' : isRecording ? 'Recording… tap mic to stop' : 'What was this for?'}
+            onChange={(e) => {
+              handleDescriptionChange(e.target.value);
+            }}
           />
+          {showSmartEntry && (
+            <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700">
+              <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-1.5">
+                Smart Entry — describe your transaction in plain language
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={smartText}
+                  onChange={e => setSmartText(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && parseSmartText(smartText)}
+                  placeholder='e.g. "50 pounds at Tesco" or "paid 200 rupees petrol"'
+                  className="flex-1 px-2 py-1.5 text-sm border border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => parseSmartText(smartText)}
+                  disabled={isParsing || !smartText.trim()}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+                >
+                  {isParsing ? '…' : 'Parse'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowSmartEntry(false); setSmartText(''); }}
+                  className="px-2 py-1.5 text-slate-400 hover:text-slate-600 text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <button

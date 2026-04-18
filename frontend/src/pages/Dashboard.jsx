@@ -12,6 +12,8 @@ const CategoryChart = React.lazy(() => import('../components/Dashboard/CategoryC
 const MemberSpending = React.lazy(() => import('../components/Dashboard/MemberSpending'));
 const PrivacyIndicator = React.lazy(() => import('../components/Dashboard/PrivacyIndicator'));
 const CountryBreakdownWidget = React.lazy(() => import('../components/Dashboard/CountryBreakdownWidget'));
+const NarrativeBanner = React.lazy(() => import('../components/AI/NarrativeBanner'));
+const NetWorthChart = React.lazy(() => import('../components/Dashboard/NetWorthChart'));
 
 const Dashboard = () => {
   const { user } = useAuthStore();
@@ -92,6 +94,10 @@ const Dashboard = () => {
         </React.Suspense>
       )}
 
+      <React.Suspense fallback={null}>
+        <NarrativeBanner />
+      </React.Suspense>
+
       <QuickAdd accounts={accounts} categories={categories} baseCurrency={dashboardData?.summary?.base_currency} />
 
       {/* Admin-only summary filter */}
@@ -145,6 +151,13 @@ const Dashboard = () => {
           </React.Suspense>
         </div>
       )}
+
+      {/* Net Worth Timeline — Phase 4 */}
+      <div className="mb-6">
+        <React.Suspense fallback={<div className="h-48 bg-white dark:bg-slate-800 rounded-xl animate-pulse" />}>
+          <NetWorthChart baseCurrency={dashboardData?.summary?.base_currency} />
+        </React.Suspense>
+      </div>
 
       {dashboardData?.recent_transactions && (
         <RecentTransactions transactions={dashboardData.recent_transactions} />

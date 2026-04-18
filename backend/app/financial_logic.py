@@ -86,6 +86,11 @@ class FinancialEngine:
         if not account:
             return Decimal('0')
 
+        # Valuation-type accounts (mutual funds, property, etc.) use current_value
+        # directly instead of summing transactions.
+        if account.type in models.VALUATION_ACCOUNT_TYPES and account.current_value is not None:
+            return account.current_value
+
         is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
         # For liabilities, flip signs: expenses add to debt, income reduces debt
@@ -345,10 +350,17 @@ class FinancialEngine:
             elif account.type == models.AccountType.BANK:
                 total_bank += balance_in_base
                 total_net_worth += balance_in_base
-            elif account.type == models.AccountType.INVESTMENT:
+            elif account.type in (
+                models.AccountType.INVESTMENT,
+                models.AccountType.MUTUAL_FUND,
+                models.AccountType.STOCK_PORTFOLIO,
+                models.AccountType.PROVIDENT_FUND,
+                models.AccountType.PROPERTY,
+                models.AccountType.FIXED_DEPOSIT,
+            ):
                 total_investments += balance_in_base
                 total_net_worth += balance_in_base
-        
+
         monthly_income = Decimal('0')
         monthly_expense = Decimal('0')
 
@@ -586,7 +598,14 @@ class FinancialEngine:
             elif account.type == models.AccountType.BANK:
                 total_bank += balance_in_base
                 total_net_worth += balance_in_base
-            elif account.type == models.AccountType.INVESTMENT:
+            elif account.type in (
+                models.AccountType.INVESTMENT,
+                models.AccountType.MUTUAL_FUND,
+                models.AccountType.STOCK_PORTFOLIO,
+                models.AccountType.PROVIDENT_FUND,
+                models.AccountType.PROPERTY,
+                models.AccountType.FIXED_DEPOSIT,
+            ):
                 total_investments += balance_in_base
                 total_net_worth += balance_in_base
 

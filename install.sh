@@ -37,16 +37,14 @@ gen_secret() {
     if command -v openssl &>/dev/null; then
         openssl rand -hex "$bytes"
     else
-        # fallback: /dev/urandom  (|| true absorbs SIGPIPE from head closing the pipe)
-        tr -dc 'a-f0-9' < /dev/urandom | head -c $(( bytes * 2 )) || true
+        tr -dc 'a-f0-9' < /dev/urandom | head -c $(( bytes * 2 ))
     fi
 }
 
 # Detect the primary LAN IP (non-loopback)
 detect_lan_ip() {
-    # Try hostname -I first (Linux), then ip route, then ifconfig
     if command -v hostname &>/dev/null && hostname -I &>/dev/null 2>&1; then
-        echo "$(hostname -I | awk '{print $1}')"
+        hostname -I | awk '{print $1}'
     elif command -v ip &>/dev/null; then
         ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}'
     elif command -v ifconfig &>/dev/null; then
@@ -58,7 +56,7 @@ detect_lan_ip() {
 ask() {
     local prompt="$1"
     local default="${2:-}"
-    local secret="${3:-false}"   # if "true", hide input
+    local secret="${3:-false}"
     local value
 
     if [[ -n "$default" ]]; then
@@ -69,7 +67,7 @@ ask() {
 
     if [[ "$secret" == "true" ]]; then
         read -r -s -p "$(echo -e "${BOLD}${prompt}:${RESET} ")" value
-        echo  # newline after silent input
+        echo
     else
         read -r -p "$(echo -e "${BOLD}${prompt}:${RESET} ")" value
     fi
@@ -86,13 +84,62 @@ echo ""
 info "This script will:"
 echo "  1. Check / install Docker and Docker Compose"
 echo "  2. Configure environment variables"
-echo "  3. Build and start all services"
+echo "  3. Optionally download AI model files (Gemma 4 E4B, ~4.7 GB)"
+echo "  4. Build and start all services"
+echo "  5. Verify the API is healthy"
 echo ""
 confirm "Continue?" Y || { echo "Aborted."; exit 0; }
 echo ""
 
 # ── 1. Dependency checks / installs ──────────────────────────────────────────
 bold "── Step 1: Dependencies ─────────────────────────────────────"
+
+install_docker_linux() {
+    if [[ ! -f /etc/os-release ]]; then
+        die "Cannot detect Linux distro. Install Docker manually: https://docs.docker.com/get-docker/"
+    fi
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    case "${ID:-}" in
+        ubuntu|debian)
+            info "Installing Docker via apt..."
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            sudo chmod a+r /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
+                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            success "Docker installed. You may need to log out and back in for group membership to take effect."
+            ;;
+        fedora|rhel|centos|rocky|almalinux)
+            info "Installing Docker via dnf/yum..."
+            sudo dnf -y install dnf-plugins-core 2>/dev/null || sudo yum -y install yum-utils
+            sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null || \
+                sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || \
+                sudo yum -y install docker-ce docker-ce-cli containerd.io
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            success "Docker installed."
+            ;;
+        arch|manjaro)
+            info "Installing Docker via pacman..."
+            sudo pacman -Sy --noconfirm docker docker-compose
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            success "Docker installed."
+            ;;
+        *)
+            die "Unsupported distro '${ID}'. Install Docker manually: https://docs.docker.com/get-docker/"
+            ;;
+    esac
+}
 
 check_or_install_docker() {
     if command -v docker &>/dev/null; then
@@ -110,80 +157,32 @@ check_or_install_docker() {
     local os
     os=$(uname -s)
     case "$os" in
-        Linux)
-            if [[ -f /etc/os-release ]]; then
-                # shellcheck source=/dev/null
-                source /etc/os-release
-                case "${ID:-}" in
-                    ubuntu|debian)
-                        info "Installing Docker via apt..."
-                        sudo apt-get update -qq
-                        sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
-                        sudo install -m 0755 -d /etc/apt/keyrings
-                        curl -fsSL https://download.docker.com/linux/${ID}/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-                        sudo chmod a+r /etc/apt/keyrings/docker.gpg
-                        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
-                            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-                        sudo apt-get update -qq
-                        sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-                        sudo systemctl enable --now docker
-                        sudo usermod -aG docker "$USER"
-                        success "Docker installed. You may need to log out and back in for group membership to take effect."
-                        ;;
-                    fedora|rhel|centos|rocky|almalinux)
-                        info "Installing Docker via dnf/yum..."
-                        sudo dnf -y install dnf-plugins-core 2>/dev/null || sudo yum -y install yum-utils
-                        sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null || \
-                            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-                        sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || \
-                            sudo yum -y install docker-ce docker-ce-cli containerd.io
-                        sudo systemctl enable --now docker
-                        sudo usermod -aG docker "$USER"
-                        success "Docker installed."
-                        ;;
-                    arch|manjaro)
-                        info "Installing Docker via pacman..."
-                        sudo pacman -Sy --noconfirm docker docker-compose
-                        sudo systemctl enable --now docker
-                        sudo usermod -aG docker "$USER"
-                        success "Docker installed."
-                        ;;
-                    *)
-                        die "Unsupported distro '${ID}'. Install Docker manually: https://docs.docker.com/get-docker/"
-                        ;;
-                esac
-            else
-                die "Cannot detect Linux distro. Install Docker manually: https://docs.docker.com/get-docker/"
-            fi
-            ;;
-        Darwin)
-            die "On macOS, install Docker Desktop from https://docs.docker.com/desktop/mac/ and re-run this script."
-            ;;
-        *)
-            die "Unsupported OS '${os}'. Install Docker manually: https://docs.docker.com/get-docker/"
-            ;;
+        Linux)   install_docker_linux ;;
+        Darwin)  die "On macOS, install Docker Desktop from https://docs.docker.com/desktop/mac/ and re-run this script." ;;
+        *)       die "Unsupported OS '${os}'. Install Docker manually: https://docs.docker.com/get-docker/" ;;
     esac
 }
 
 check_or_install_docker
 
 # Verify Docker Compose (v2 plugin or standalone)
+COMPOSE_CMD=""
 if docker compose version &>/dev/null 2>&1; then
     success "Docker Compose v2 (plugin) is available."
+    COMPOSE_CMD="docker compose"
 elif command -v docker-compose &>/dev/null; then
-    # Standalone v1 — still works but warn
-    warn "docker-compose v1 detected. Preferring it. Consider upgrading to Docker Compose v2."
+    warn "docker-compose v1 detected. Consider upgrading to Docker Compose v2."
     COMPOSE_CMD="docker-compose"
 else
     warn "Docker Compose not found."
     if confirm "Install Docker Compose plugin automatically (requires sudo)?" Y; then
-        os=$(uname -s)
-        if [[ "$os" == "Linux" ]]; then
+        local_os=$(uname -s)
+        if [[ "$local_os" == "Linux" ]]; then
             sudo apt-get install -y -qq docker-compose-plugin 2>/dev/null || \
                 sudo dnf -y install docker-compose-plugin 2>/dev/null || \
-                die "Could not install Docker Compose automatically. Install from https://docs.docker.com/compose/install/"
+                die "Could not install Docker Compose automatically. See https://docs.docker.com/compose/install/"
             success "Docker Compose installed."
+            COMPOSE_CMD="docker compose"
         else
             die "Install Docker Compose from https://docs.docker.com/compose/install/ and re-run."
         fi
@@ -191,8 +190,6 @@ else
         die "Docker Compose is required."
     fi
 fi
-
-COMPOSE_CMD="${COMPOSE_CMD:-docker compose}"
 
 echo ""
 
@@ -207,16 +204,13 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
     die ".env.example not found in ${SCRIPT_DIR}. Is this the ShreeOne project directory?"
 fi
 
+SKIP_ENV=false
 if [[ -f "$ENV_FILE" ]]; then
     warn ".env file already exists."
     if ! confirm "Overwrite it with new configuration?" N; then
         info "Keeping existing .env. Skipping configuration step."
         SKIP_ENV=true
-    else
-        SKIP_ENV=false
     fi
-else
-    SKIP_ENV=false
 fi
 
 if [[ "$SKIP_ENV" == "false" ]]; then
@@ -301,24 +295,67 @@ SECRET_KEY=${SECRET_KEY}
 FRONTEND_URL=${FRONTEND_URL}
 ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
 REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS}
+
+# ── Local AI (Ollama + Gemma 4 E4B) ───────────────────────────────────────────
+# Internal Docker network address — leave as-is when using docker-compose.ai.yml.
+# Remove or leave empty to disable AI features.
+LLM_BASE_URL=http://llm:11434
+LLM_MODEL=gemma4:e4b
+
+# Seconds to wait for a single LLM inference call before timing out.
+# Gemma 4 E4B needs ~60–90 s on a 4-core machine.
+LLM_TIMEOUT_SECONDS=90
 EOF
 
     success ".env written to ${ENV_FILE}"
 fi
 echo ""
 
-# ── 3. Build and start ────────────────────────────────────────────────────────
-bold "── Step 3: Build & Start Services ──────────────────────────"
+# ── 3. Local AI — optional model download ─────────────────────────────────────
+bold "── Step 3: Local AI Setup (Optional) ───────────────────────"
+echo ""
+info "ShreeOne includes on-device AI features powered by Ollama + Gemma 4 E4B:"
+echo "  • Transaction auto-categorisation"
+echo "  • Receipt OCR (scan receipts with your camera)"
+echo "  • Voice / smart-text transaction entry"
+echo "  • Monthly narrative & weekly spending digest"
+echo "  • Bank statement import (PDF or image)"
+echo ""
+info "Model: gemma4:e4b  (~4.7 GB, pulled automatically by Ollama)"
+info "The app works fully without AI — you can enable it later."
+echo ""
+
+ENABLE_AI=false
+if confirm "Enable AI features? (Ollama will pull the model on first start)" N; then
+    ENABLE_AI=true
+    info "AI enabled. Ollama will pull gemma4:e4b automatically when the stack starts."
+    info "First start may take several minutes while the ~4.7 GB model is downloaded."
+else
+    info "Skipping AI features."
+    info "To enable AI later:  docker compose -f docker-compose.ai.yml up -d --build"
+fi
+echo ""
+
+# ── 4. Build and start ────────────────────────────────────────────────────────
+bold "── Step 4: Build & Start Services ──────────────────────────"
 
 cd "$SCRIPT_DIR"
 
-info "Running: ${COMPOSE_CMD} up -d --build"
-echo ""
-$COMPOSE_CMD up -d --build
+if [[ "$ENABLE_AI" == "true" ]]; then
+    info "Starting full stack with AI (Ollama + Gemma 4 E4B)..."
+    info "Running: ${COMPOSE_CMD} -f docker-compose.ai.yml up -d --build"
+    echo ""
+    $COMPOSE_CMD -f docker-compose.ai.yml up -d --build
+else
+    info "Starting core stack (no AI service)..."
+    info "Running: ${COMPOSE_CMD} up -d --build"
+    echo ""
+    $COMPOSE_CMD up -d --build
+fi
 echo ""
 
-# ── 4. Health check ───────────────────────────────────────────────────────────
-bold "── Step 4: Health Check ─────────────────────────────────────"
+# ── 5. Health check ───────────────────────────────────────────────────────────
+bold "── Step 5: Health Check ─────────────────────────────────────"
 
 HEALTH_URL="http://localhost:5173/api/health"
 MAX_WAIT=90
@@ -343,7 +380,7 @@ if curl -fsS "$HEALTH_URL" &>/dev/null; then
     success "API is healthy!"
 fi
 
-# ── 5. Done ───────────────────────────────────────────────────────────────────
+# ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 bold "============================================================"
 bold "  ShreeOne is up and running!"
@@ -357,10 +394,12 @@ echo -e "  ${GREEN}App URL:${RESET}        ${BOLD}${DISPLAY_URL}${RESET}"
 echo -e "  ${GREEN}API health:${RESET}     ${BOLD}${DISPLAY_URL}/api/health${RESET}"
 echo ""
 echo "  Useful commands:"
-echo "    ${COMPOSE_CMD} logs -f          # stream logs from all services"
-echo "    ${COMPOSE_CMD} ps               # check service status"
-echo "    ${COMPOSE_CMD} down             # stop all services"
-echo "    bash scripts/backup.sh         # manual database backup"
+echo "    ${COMPOSE_CMD} logs -f                                    # stream logs from all services"
+echo "    ${COMPOSE_CMD} ps                                         # check service status"
+echo "    ${COMPOSE_CMD} down                                       # stop all services"
+echo "    bash scripts/backup.sh                                   # manual database backup"
+echo "    ${COMPOSE_CMD} -f docker-compose.ai.yml up -d --build    # start with AI features (Ollama)"
+echo "    ${COMPOSE_CMD} up -d --build                             # start without AI"
 echo ""
 info "Register the first admin account by opening the app URL in your browser."
 echo ""

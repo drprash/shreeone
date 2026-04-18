@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { Plus, X, Clock, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Clock, Pencil, Trash2, Camera, Sparkles, Upload, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useAIStatus } from '../hooks/useAIStatus';
+import { categorizeTransaction, parseReceipt, parseStatement, bulkCreateTransactions } from '../services/aiAPI';
 import { formatAccountDisplayName, formatCurrency, formatDate, getCurrencySymbol } from '../utils/formatters';
 import { formatDateForInput, parseDateForPicker, toNaiveDateTimeString } from '../utils/dateUtils';
 import { queryKeys } from '../utils/queryKeys';
@@ -100,8 +102,120 @@ const Transactions = () => {
     staleTime: 1000 * 60 * 5,
   });
 
+  const aiStatus = useAIStatus();
+  const aiAvailable = aiStatus.ai_service_available;
+  const [aiSuggestion, setAiSuggestion] = useState(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const receiptInputRef = useRef(null);
+
+  // Statement upload state
+  const [showStatementModal, setShowStatementModal] = useState(false);
+  const [statementRows, setStatementRows] = useState([]);       // parsed rows from AI
+  const [statementFile, setStatementFile] = useState(null);
+  const [statementAccountId, setStatementAccountId] = useState('');
+  const [statementAccountType, setStatementAccountType] = useState('BANK');
+  const [isParsing, setIsParsing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [statementStep, setStatementStep] = useState('upload'); // 'upload' | 'preview'
+  const statementInputRef = useRef(null);
+  const categorizationTimer = useRef(null);
+
+  const handleDescriptionChange = useCallback((description) => {
+    setAiSuggestion(null);
+    clearTimeout(categorizationTimer.current);
+    if (!aiAvailable || !aiStatus.ai_categorization_enabled || description.length < 3) return;
+    categorizationTimer.current = setTimeout(async () => {
+      try {
+        const result = await categorizeTransaction(description);
+        if (result?.category_id) setAiSuggestion(result);
+      } catch { /* silent */ }
+    }, 800);
+  }, [aiAvailable, aiStatus.ai_categorization_enabled]);
+
+  useEffect(() => () => clearTimeout(categorizationTimer.current), []);
+
+  const handleReceiptScan = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsScanning(true);
+    try {
+      const result = await parseReceipt(file);
+      if (!result?.is_receipt) { toast.error('No receipt found in the image'); return; }
+      setFormData(prev => ({
+        ...prev,
+        ...(result.amount      ? { amount: String(result.amount) } : {}),
+        ...(result.description ? { description: result.description } : {}),
+        ...(result.currency    ? { tx_currency: result.currency } : {}),
+        ...(result.date        ? { transaction_date: parseDateForPicker(result.date) } : {}),
+      }));
+      toast.success('Receipt scanned — please review and confirm');
+    } catch {
+      toast.error('Could not parse receipt');
+    } finally {
+      setIsScanning(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleStatementParse = async () => {
+    if (!statementFile || !statementAccountId) {
+      toast.error('Select a file and account first');
+      return;
+    }
+    setIsParsing(true);
+    try {
+      const result = await parseStatement(statementFile, statementAccountId, statementAccountType);
+      if (!result?.transactions?.length) {
+        toast.error('No expense transactions found in the statement');
+        return;
+      }
+      const selectedAcc = accounts?.find(a => a.id === statementAccountId);
+      const accCurrency = selectedAcc?.currency || '';
+      // Attach currency and toggle selected for non-duplicates
+      setStatementRows(result.transactions.map(row => ({
+        ...row,
+        currency: row.currency || accCurrency,
+        selected: !row.duplicate,
+      })));
+      setStatementStep('preview');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to parse statement');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleStatementImport = async () => {
+    const toImport = statementRows.filter(r => r.selected && !r.duplicate);
+    if (!toImport.length) { toast.error('No rows selected'); return; }
+    setIsImporting(true);
+    try {
+      const selectedAcc = accounts?.find(a => a.id === statementAccountId);
+      const accCurrency = selectedAcc?.currency || 'USD';
+      const transactions = toImport.map(row => ({
+        type: 'EXPENSE',
+        amount: parseFloat(row.amount),
+        currency: row.currency || accCurrency,
+        description: row.description || '',
+        transaction_date: row.date ? `${row.date}T00:00:00` : new Date().toISOString(),
+        account_id: statementAccountId,
+        category_id: row.category_id || null,
+      }));
+      const result = await bulkCreateTransactions(transactions);
+      toast.success(`Imported ${result.created} transaction${result.created !== 1 ? 's' : ''}${result.failed ? `, ${result.failed} failed` : ''}`);
+      setShowStatementModal(false);
+      setStatementRows([]);
+      setStatementFile(null);
+      setStatementStep('upload');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Import failed');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const { mutate: createTransaction, isPending: createPending } = useCreateTransaction({
-    onSuccess: () => { setShowModal(false); resetForm(); },
+    onSuccess: () => { setShowModal(false); resetForm(); setAiSuggestion(null); },
   });
   const { mutate: updateTransaction, isPending: updatePending } = useUpdateTransaction({
     onSuccess: () => { setShowModal(false); resetForm(); },
@@ -258,13 +372,24 @@ const Transactions = () => {
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Transactions</h1>
           <p className="text-gray-600 mt-1">Manage your income and expenses</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700"
-        >
-          <Plus className="w-5 h-5" />
-          Add Transaction
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {aiAvailable && aiStatus.ai_statement_upload_enabled !== false && (
+            <button
+              onClick={() => { setStatementStep('upload'); setShowStatementModal(true); }}
+              className="w-full sm:w-auto bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-50"
+            >
+              <Upload className="w-4 h-4" />
+              Upload Statement
+            </button>
+          )}
+          <button
+            onClick={() => setShowModal(true)}
+            className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700"
+          >
+            <Plus className="w-5 h-5" />
+            Add Transaction
+          </button>
+        </div>
       </div>
 
       {/* Show privacy level indicator for non-admin members */}
@@ -387,6 +512,7 @@ const Transactions = () => {
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     onClick={() => {
+                      const accCurrency = t.account?.currency;
                       setFormData({
                         type: t.type,
                         amount: t.amount.toString(),
@@ -395,8 +521,8 @@ const Transactions = () => {
                         category_id: t.category_id || '',
                         target_account_id: t.linked_transaction_id ? t.target_account_id : '',
                         transfer_conversion_rate: '1.00',
-                        tx_currency: '',
-                        exchange_rate_to_base: '',
+                        tx_currency: accCurrency && t.currency !== accCurrency ? t.currency : '',
+                        exchange_rate_to_base: t.exchange_rate_to_base ? String(t.exchange_rate_to_base) : '',
                         transaction_date: parseDateForPicker(t.transaction_date)
                       });
                       setEditingId(t.id);
@@ -511,6 +637,7 @@ const Transactions = () => {
                   <td className="px-3 sm:px-6 py-4 text-sm flex gap-2">
                     <button
                       onClick={() => {
+                        const accCurrency = t.account?.currency;
                         setFormData({
                           type: t.type,
                           amount: t.amount.toString(),
@@ -519,8 +646,8 @@ const Transactions = () => {
                           category_id: t.category_id || '',
                           target_account_id: t.linked_transaction_id ? t.target_account_id : '',
                           transfer_conversion_rate: '1.00',
-                          tx_currency: '',
-                          exchange_rate_to_base: '',
+                          tx_currency: accCurrency && t.currency !== accCurrency ? t.currency : '',
+                          exchange_rate_to_base: t.exchange_rate_to_base ? String(t.exchange_rate_to_base) : '',
                           transaction_date: parseDateForPicker(t.transaction_date)
                         });
                         setEditingId(t.id);
@@ -724,6 +851,20 @@ const Transactions = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Category *
                   </label>
+                  {aiSuggestion && (
+                    <div className="flex items-center gap-2 mb-1.5 px-2 py-1 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-700">
+                      <Sparkles className="w-3 h-3 shrink-0" />
+                      <span>AI suggests: <strong>{aiSuggestion.category}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => { setFormData(f => ({...f, category_id: aiSuggestion.category_id})); setAiSuggestion(null); }}
+                        className="ml-auto px-2 py-0.5 bg-violet-600 text-white rounded text-xs hover:bg-violet-700"
+                      >
+                        Accept
+                      </button>
+                      <button type="button" onClick={() => setAiSuggestion(null)} className="text-violet-400 hover:text-violet-600">✕</button>
+                    </div>
+                  )}
                   <select
                     required
                     value={formData.category_id}
@@ -828,13 +969,39 @@ const Transactions = () => {
 
               {/* Description */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Description</label>
+                  {aiAvailable && aiStatus.ai_receipt_ocr_enabled !== false && (
+                    <>
+                      <input
+                        ref={receiptInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={handleReceiptScan}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => receiptInputRef.current?.click()}
+                        disabled={isScanning}
+                        className="p-1 text-gray-400 hover:text-blue-500 disabled:opacity-50"
+                        title="Scan receipt"
+                      >
+                        <Camera className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  onChange={(e) => {
+                    setFormData({...formData, description: e.target.value});
+                    handleDescriptionChange(e.target.value);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="What was this for?"
+                  placeholder={isScanning ? 'Scanning receipt…' : 'What was this for?'}
                 />
               </div>
 
@@ -864,6 +1031,215 @@ const Transactions = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Statement Upload Modal ─────────────────────────────────────── */}
+      {showStatementModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Upload Bank Statement</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {statementStep === 'upload'
+                    ? 'Upload a PDF or image of your bank or credit card statement'
+                    : `${statementRows.filter(r => r.selected).length} of ${statementRows.length} transactions selected`}
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowStatementModal(false); setStatementRows([]); setStatementFile(null); setStatementStep('upload'); }}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="overflow-y-auto flex-1 p-5">
+              {statementStep === 'upload' ? (
+                <div className="space-y-4">
+                  {/* Account selector */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
+                    <select
+                      value={statementAccountId}
+                      onChange={e => setStatementAccountId(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select account…</option>
+                      {accounts?.map(acc => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.currency})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Account type */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Statement type</label>
+                    <div className="flex gap-3">
+                      {['BANK', 'CREDIT_CARD'].map(t => (
+                        <label key={t} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="accountType"
+                            value={t}
+                            checked={statementAccountType === t}
+                            onChange={() => setStatementAccountType(t)}
+                          />
+                          <span className="text-sm text-gray-700">{t === 'BANK' ? 'Bank / Debit' : 'Credit Card'}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* File picker */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Statement file</label>
+                    <input
+                      ref={statementInputRef}
+                      type="file"
+                      accept=".pdf,image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={e => setStatementFile(e.target.files?.[0] || null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => statementInputRef.current?.click()}
+                      className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                    >
+                      <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                      {statementFile
+                        ? <span className="text-sm text-gray-700 font-medium">{statementFile.name}</span>
+                        : <span className="text-sm text-gray-500">Click to select PDF or image (max 20 MB)</span>}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Preview table */
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <button
+                      className="text-sm text-blue-600 hover:underline"
+                      onClick={() => setStatementRows(prev => prev.map(r => ({ ...r, selected: !r.duplicate })))}
+                    >Select all non-duplicates</button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      className="text-sm text-blue-600 hover:underline"
+                      onClick={() => setStatementRows(prev => prev.map(r => ({ ...r, selected: false })))}
+                    >Deselect all</button>
+                  </div>
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 text-left">
+                        <th className="px-3 py-2 font-medium text-gray-600 w-8"></th>
+                        <th className="px-3 py-2 font-medium text-gray-600">Date</th>
+                        <th className="px-3 py-2 font-medium text-gray-600">Description</th>
+                        <th className="px-3 py-2 font-medium text-gray-600">Category</th>
+                        <th className="px-3 py-2 font-medium text-gray-600 text-right">Amount</th>
+                        <th className="px-3 py-2 font-medium text-gray-600 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statementRows.map((row, i) => (
+                        <tr
+                          key={i}
+                          className={`border-t ${row.duplicate ? 'bg-yellow-50 opacity-60' : row.selected ? '' : 'opacity-50'}`}
+                        >
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={!!row.selected}
+                              disabled={row.duplicate}
+                              onChange={e => setStatementRows(prev =>
+                                prev.map((r, j) => j === i ? { ...r, selected: e.target.checked } : r)
+                              )}
+                            />
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-700">{row.date || '—'}</td>
+                          <td className="px-3 py-2 text-gray-700">
+                            <input
+                              className="w-full border-0 bg-transparent focus:bg-white focus:border focus:rounded px-1"
+                              value={row.description || ''}
+                              onChange={e => setStatementRows(prev =>
+                                prev.map((r, j) => j === i ? { ...r, description: e.target.value } : r)
+                              )}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 text-xs">{row.category_hint || '—'}</td>
+                          <td className="px-3 py-2 text-right font-medium text-red-600 whitespace-nowrap">
+                            {row.currency} {parseFloat(row.amount || 0).toFixed(2)}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {row.duplicate && (
+                              <span title="Possible duplicate">
+                                <AlertTriangle className="w-4 h-4 text-yellow-500 inline" />
+                              </span>
+                            )}
+                            {!row.duplicate && row.selected && (
+                              <CheckCircle2 className="w-4 h-4 text-green-500 inline" />
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {statementRows.some(r => r.duplicate) && (
+                    <p className="text-xs text-yellow-700 mt-2 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      Highlighted rows may already exist in your account. They are deselected by default.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 border-t flex justify-end gap-3">
+              <button
+                onClick={() => { setShowStatementModal(false); setStatementRows([]); setStatementFile(null); setStatementStep('upload'); }}
+                className="px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              {statementStep === 'preview' && (
+                <button
+                  onClick={() => setStatementStep('upload')}
+                  className="px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
+                >
+                  Back
+                </button>
+              )}
+              {statementStep === 'upload' ? (
+                <button
+                  onClick={handleStatementParse}
+                  disabled={isParsing || !statementFile || !statementAccountId}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isParsing ? (
+                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Parsing…</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4" /> Parse Statement</>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={handleStatementImport}
+                  disabled={isImporting || !statementRows.some(r => r.selected && !r.duplicate)}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isImporting ? (
+                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Importing…</>
+                  ) : (
+                    <>Import {statementRows.filter(r => r.selected && !r.duplicate).length} Transactions</>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

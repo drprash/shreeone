@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import Column, String, Float, DateTime, Boolean, ForeignKey, Enum, Numeric, Text, Integer, Date, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, ENUM
 from sqlalchemy.orm import relationship
@@ -15,10 +15,25 @@ class AccountType(enum.Enum):
     BANK = "BANK"
     CREDIT_CARD = "CREDIT_CARD"
     INVESTMENT = "INVESTMENT"
+    MUTUAL_FUND = "MUTUAL_FUND"
+    STOCK_PORTFOLIO = "STOCK_PORTFOLIO"
+    PROVIDENT_FUND = "PROVIDENT_FUND"
+    PROPERTY = "PROPERTY"
+    FIXED_DEPOSIT = "FIXED_DEPOSIT"
+    LOAN = "LOAN"
 
 # Account types that represent liabilities (inverted balance sign convention).
 # Add new liability types here (e.g. LOAN, MORTGAGE) without changing financial logic.
-LIABILITY_ACCOUNT_TYPES: frozenset = frozenset({AccountType.CREDIT_CARD})
+LIABILITY_ACCOUNT_TYPES: frozenset = frozenset({AccountType.CREDIT_CARD, AccountType.LOAN})
+
+# Account types that use current_value instead of transaction-derived balance
+VALUATION_ACCOUNT_TYPES: frozenset = frozenset({
+    AccountType.MUTUAL_FUND,
+    AccountType.STOCK_PORTFOLIO,
+    AccountType.PROVIDENT_FUND,
+    AccountType.PROPERTY,
+    AccountType.FIXED_DEPOSIT,
+})
 
 class OwnerType(enum.Enum):
     PERSONAL = "PERSONAL"
@@ -80,6 +95,8 @@ class Family(Base):
     family_preferences = relationship("FamilyPreference", back_populates="family")
     family_currencies = relationship("FamilyCurrency", back_populates="family")
     exchange_rates = relationship("ExchangeRate", back_populates="family")
+    net_worth_snapshots = relationship("NetWorthSnapshot", back_populates="family")
+    goals = relationship("Goal", back_populates="family")
 
 class User(Base):
     __tablename__ = "users"
@@ -166,6 +183,8 @@ class Account(Base):
     include_in_family_overview = Column(Boolean, default=True)
     opening_balance = Column(Numeric(15, 2), default=0)
     current_balance = Column(Numeric(15, 2), default=0)
+    current_value = Column(Numeric(15, 2), nullable=True)
+    last_valued_at = Column(DateTime, nullable=True)
     country_code = Column(String(2), nullable=True)  # ISO 3166-1 alpha-2
     sort_order = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -313,7 +332,7 @@ class RecurringPayment(Base):
 
 class FamilyPreference(Base):
     __tablename__ = "family_preferences"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     family_id = Column(UUID(as_uuid=True), ForeignKey("families.id"), unique=True, nullable=False)
     theme = Column(String(20), default="light")
@@ -322,6 +341,16 @@ class FamilyPreference(Base):
     two_factor_enabled = Column(Boolean, default=False)
     show_net_worth_by_country = Column(Boolean, default=True)
     show_member_spending = Column(Boolean, default=True)
+    ai_categorization_enabled = Column(Boolean, default=True)
+    ai_monthly_narrative_enabled = Column(Boolean, default=True)
+    ai_weekly_digest_enabled = Column(Boolean, default=True)
+    ai_receipt_ocr_enabled = Column(Boolean, default=True)
+    ai_voice_entry_enabled = Column(Boolean, default=True)
+    ai_statement_upload_enabled = Column(Boolean, default=True)
+    # NULL means use LLM_PROVIDER env default; "local", "openai", "anthropic", "google"
+    ai_provider = Column(String(20), nullable=True, default=None)
+    # NULL means use the provider's default model
+    ai_model_override = Column(String(100), nullable=True, default=None)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -364,3 +393,80 @@ class ExchangeRate(Base):
 
     family = relationship("Family", back_populates="exchange_rates")
 
+
+class GoalType(enum.Enum):
+    SAVINGS_TARGET = "SAVINGS_TARGET"
+    PURCHASE = "PURCHASE"
+    DEBT_PAYOFF = "DEBT_PAYOFF"
+    NET_WORTH_MILESTONE = "NET_WORTH_MILESTONE"
+    REMITTANCE = "REMITTANCE"
+
+
+class NetWorthSnapshot(Base):
+    """Daily snapshot of family net worth for timeline charting."""
+    __tablename__ = "net_worth_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    family_id = Column(UUID(as_uuid=True), ForeignKey("families.id"), nullable=False)
+    snapshot_date = Column(Date, nullable=False)
+    total_net_worth = Column(Numeric(15, 2), nullable=False)
+    breakdown_json = Column(Text, nullable=True)  # JSON: {cash, bank, investment, property, liability}
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    family = relationship("Family", back_populates="net_worth_snapshots")
+
+    __table_args__ = (
+        UniqueConstraint("family_id", "snapshot_date", name="uq_family_snapshot_date"),
+    )
+
+
+class Goal(Base):
+    """Financial goal with progress tracking."""
+    __tablename__ = "goals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    family_id = Column(UUID(as_uuid=True), ForeignKey("families.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    type = Column(Enum(GoalType), nullable=False)
+    target_amount = Column(Numeric(15, 2), nullable=False)
+    current_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    currency = Column(String(3), nullable=False)
+    target_date = Column(Date, nullable=True)
+    linked_account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    archived_at = Column(DateTime, nullable=True)
+
+    family = relationship("Family", back_populates="goals")
+    linked_account = relationship("Account")
+    contributions = relationship("GoalContribution", back_populates="goal", cascade="all, delete-orphan", order_by="GoalContribution.contributed_at.desc()")
+
+
+class GoalContribution(Base):
+    """A manual contribution logged toward a specific goal."""
+    __tablename__ = "goal_contributions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    goal_id = Column(UUID(as_uuid=True), ForeignKey("goals.id", ondelete="CASCADE"), nullable=False)
+    amount = Column(Numeric(15, 2), nullable=False)
+    note = Column(Text, nullable=True)
+    contributed_at = Column(Date, nullable=False, default=date.today)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    goal = relationship("Goal", back_populates="contributions")
+
+
+class AINarrative(Base):
+    """Stores AI-generated monthly/weekly summaries per family."""
+    __tablename__ = "ai_narratives"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    family_id = Column(UUID(as_uuid=True), ForeignKey("families.id"), nullable=False)
+    # "MONTHLY" or "WEEKLY"
+    narrative_type = Column(String(10), nullable=False)
+    # Human-readable label, e.g. "February 2026" or "Week of Mar 10"
+    period_label = Column(String(50), nullable=False)
+    content = Column(Text, nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    dismissed_at = Column(DateTime, nullable=True)

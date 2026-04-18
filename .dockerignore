@@ -1,0 +1,51 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Version control
+.git/
+.gitignore
+
+# IDE / OS
+.idea/
+.vscode/
+.claude/
+.DS_Store
+Thumbs.db
+
+# Docs / planning (not needed in image)
+*.md
+docs/
+SHREEONE_PROJECT_PLAN.md
+
+# Python artefacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.venv/
+backend/venv/
+
+# Node artefacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+
+# Large runtime data — never in image
+models/
+uploads/
+backups/
+ssl/
+
+# Test infrastructure
+docker-compose.test.yml
+backend/tests/
+scripts/
+
+# Logs
+*.log
+logs/

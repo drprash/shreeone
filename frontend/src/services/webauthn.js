@@ -1,7 +1,5 @@
 import api from './api';
 
-// ── Base64url helpers ──────────────────────────────────────────────────────
-
 function bufferToBase64url(buffer) {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)))
     .replace(/\+/g, '-')
@@ -17,8 +15,6 @@ function base64urlToBuffer(base64url) {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer;
 }
 
-// ── Feature detection ──────────────────────────────────────────────────────
-
 export function isWebAuthnSupported() {
   return typeof window !== 'undefined' && !!window.PublicKeyCredential;
 }
@@ -31,8 +27,6 @@ export async function isPlatformAuthenticatorAvailable() {
     return false;
   }
 }
-
-// ── Registration ───────────────────────────────────────────────────────────
 
 /**
  * Convert server-sent registration options into the shape expected by
@@ -90,8 +84,6 @@ export async function registerPasskey(deviceName) {
   const completeRes = await api.post('/auth/webauthn/register/complete', payload);
   return completeRes.data;
 }
-
-// ── Authentication ─────────────────────────────────────────────────────────
 
 /**
  * Convert server-sent authentication options into the shape expected by

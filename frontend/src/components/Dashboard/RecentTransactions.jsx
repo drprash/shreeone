@@ -18,7 +18,7 @@ const RecentTransactions = ({ transactions }) => {
                 <span className="font-medium text-sm truncate">{transaction.description || 'No description'}</span>
               </div>
               <span className={`text-sm font-medium whitespace-nowrap shrink-0 ${getTransactionAmountColor(transaction.type)}`}>
-                {transaction.type === 'EXPENSE' ? '-' : '+'}
+                {transaction.type === 'INCOME' ? '+' : transaction.type === 'EXPENSE' ? '-' : ''}
                 {formatCurrency(transaction.amount, transaction.currency)}
               </span>
             </div>
@@ -83,7 +83,7 @@ const RecentTransactions = ({ transactions }) => {
                   {formatAccountDisplayName(transaction.account)}
                 </td>
                 <td className={`py-3 text-right font-medium ${getTransactionAmountColor(transaction.type)}`}>
-                  {transaction.type === 'EXPENSE' ? '-' : '+'}
+                  {transaction.type === 'INCOME' ? '+' : transaction.type === 'EXPENSE' ? '-' : ''}
                   {formatCurrency(transaction.amount, transaction.currency)}
                 </td>
               </tr>

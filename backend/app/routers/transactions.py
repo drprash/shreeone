@@ -161,6 +161,58 @@ def update_transaction(
             detail=str(e)
         )
 
+@router.post("/bulk", response_model=schemas.BulkTransactionResponse, status_code=status.HTTP_201_CREATED)
+def bulk_create_transactions(
+    payload: schemas.BulkTransactionCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """
+    Create multiple EXPENSE transactions in one request.
+    Used by the statement upload preview → confirm flow.
+    Partial success is allowed: failed rows are counted but do not abort the batch.
+    """
+    created_ids = []
+    failed = 0
+
+    for item in payload.transactions:
+        try:
+            account = crud.get_account(db, item.account_id)
+            if not account or not auth.check_account_access(current_user, account):
+                failed += 1
+                continue
+
+            tx_in = schemas.TransactionCreate(
+                type=models.TransactionType.EXPENSE,
+                amount=item.amount,
+                currency=item.currency.upper(),
+                description=item.description,
+                transaction_date=item.transaction_date,
+                account_id=item.account_id,
+                category_id=item.category_id,
+                exchange_rate_to_base=item.exchange_rate_to_base,
+            )
+
+            tx_obj, _ = FinancialEngine.process_transaction(db, current_user, tx_in)
+            crud.create_audit_log(
+                db=db,
+                user_id=current_user.id,
+                action="CREATE",
+                entity_type="Transaction",
+                entity_id=tx_obj.id,
+                new_values=f"bulk_import:{str(item.dict())}",
+            )
+            created_ids.append(tx_obj.id)
+        except Exception:
+            failed += 1
+
+    return schemas.BulkTransactionResponse(
+        created=len(created_ids),
+        failed=failed,
+        transaction_ids=created_ids,
+    )
+
+
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transaction(
     transaction_id: UUID,

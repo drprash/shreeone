@@ -120,6 +120,57 @@ def get_dashboard_with_country(
     )
 
 
+@router.get("/net-worth-history", response_model=list[schemas.NetWorthSnapshotResponse])
+def net_worth_history(
+    months: int = 12,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Return the last N months of daily net worth snapshots for the current family."""
+    from datetime import timedelta, datetime as dt
+    cutoff = dt.utcnow().date() - timedelta(days=months * 31)
+    return (
+        db.query(models.NetWorthSnapshot)
+        .filter(
+            models.NetWorthSnapshot.family_id == current_user.family_id,
+            models.NetWorthSnapshot.snapshot_date >= cutoff,
+        )
+        .order_by(models.NetWorthSnapshot.snapshot_date.asc())
+        .all()
+    )
+
+
+@router.get("/stale-valuations", response_model=list[dict])
+def stale_valuations(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Return investment/property accounts that haven't been valued in 30+ days."""
+    from datetime import timedelta, datetime as dt
+    threshold = dt.utcnow() - timedelta(days=30)
+    stale = db.query(models.Account).filter(
+        models.Account.family_id == current_user.family_id,
+        models.Account.deleted_at.is_(None),
+        models.Account.type.in_([
+            models.AccountType.MUTUAL_FUND,
+            models.AccountType.STOCK_PORTFOLIO,
+            models.AccountType.PROVIDENT_FUND,
+            models.AccountType.PROPERTY,
+            models.AccountType.FIXED_DEPOSIT,
+        ]),
+        (models.Account.last_valued_at.is_(None)) | (models.Account.last_valued_at < threshold),
+    ).all()
+    return [
+        {
+            "id": str(a.id),
+            "name": a.name,
+            "type": a.type.value,
+            "last_valued_at": a.last_valued_at.isoformat() if a.last_valued_at else None,
+        }
+        for a in stale
+    ]
+
+
 @router.get("/member/{member_id}", response_model=schemas.DashboardSummary)
 def get_member_summary(
     member_id: UUID,

@@ -1,0 +1,220 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f3f4f6;
+}
+
+@layer base {
+  html.dark {
+    @apply bg-slate-950;
+    color-scheme: dark;
+  }
+
+  html.dark input[type="text"],
+  html.dark input[type="email"],
+  html.dark input[type="password"],
+  html.dark input[type="number"],
+  html.dark input[type="date"],
+  html.dark textarea,
+  html.dark select {
+    @apply bg-slate-700 text-slate-100 border-slate-600;
+  }
+
+  html.dark input::placeholder,
+  html.dark textarea::placeholder {
+    @apply text-slate-400;
+  }
+
+  html.dark input:disabled,
+  html.dark textarea:disabled,
+  html.dark select:disabled {
+    @apply bg-slate-800 text-slate-300 border-slate-700;
+  }
+
+  html.dark input[type="checkbox"],
+  html.dark input[type="radio"] {
+    @apply border-slate-600;
+  }
+
+  html.dark label {
+    @apply text-slate-300;
+  }
+
+  html.dark h1,
+  html.dark h2,
+  html.dark h3,
+  html.dark h4,
+  html.dark h5,
+  html.dark h6 {
+    @apply text-slate-100;
+  }
+
+  html.dark p {
+    @apply text-slate-300;
+  }
+
+  html.dark .bg-white {
+    @apply dark:bg-slate-800;
+  }
+
+  html.dark .bg-gray-100,
+  html.dark .bg-slate-50 {
+    @apply dark:bg-slate-800;
+  }
+
+  html.dark .bg-gray-50 {
+    @apply dark:bg-slate-700;
+  }
+
+  html.dark .text-gray-900 {
+    @apply dark:text-slate-100;
+  }
+
+  html.dark .text-gray-600,
+  html.dark .text-slate-600 {
+    @apply dark:text-slate-400;
+  }
+
+  html.dark .text-gray-500,
+  html.dark .text-slate-500 {
+    @apply dark:text-slate-400;
+  }
+
+  html.dark .border-gray-200,
+  html.dark .border-slate-200 {
+    @apply dark:border-slate-700;
+  }
+
+  html.dark .border-gray-300,
+  html.dark .border-slate-300 {
+    @apply dark:border-slate-600;
+  }
+
+  html.dark .shadow {
+    @apply dark:shadow-slate-900;
+  }
+}
+
+@layer components {
+  /* Glass Morphism Panel */
+  .glass-panel {
+    @apply bg-white/70 dark:bg-slate-800/70;
+    backdrop-filter: blur(12px);
+    @apply border border-white/30 dark:border-slate-700/30;
+  }
+
+  /* Gradient Backgrounds */
+  .gradient-bg {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  }
+
+  .role-badge {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  }
+
+  .admin-badge {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  }
+
+  /* Card Hover Effect */
+  .card-hover {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  .card-hover:hover {
+    transform: translateY(-4px);
+    @apply shadow-lg;
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
+  }
+
+  /* Expense Item Hover */
+  .expense-item {
+    @apply transition-all duration-200 ease;
+  }
+
+  .expense-item:hover {
+    @apply bg-indigo-50 dark:bg-indigo-900/10;
+    transform: translateX(4px);
+  }
+
+  /* Chart Animation */
+  .chart-bar {
+    transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Modal Backdrop */
+  .modal-backdrop {
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+  }
+
+  /* Input Focus State */
+  .input-focus:focus {
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  }
+
+  /* Button Press Effect */
+  .btn-press:active {
+    transform: scale(0.98);
+  }
+
+  /* Category Icon Container */
+  .category-icon {
+    @apply inline-flex items-center justify-center w-10 h-10 rounded-xl;
+  }
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.slide-in {
+  animation: slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100 dark:bg-slate-800 rounded;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 dark:bg-slate-600 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400 dark:bg-slate-500;
+}

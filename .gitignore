@@ -1,0 +1,109 @@
+# Secrets and environment files
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+!.env.example
+
+# IDE and OS files
+.idea/
+.vscode/
+.claude/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs and debug artifacts
+*.log
+*.hprof
+logs/
+debug.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+backend/*.db
+backend/**/*.db
+
+# Python backend
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/.Python
+backend/env/
+backend/ENV/
+
+# Node frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+frontend/.parcel-cache/
+frontend/.next/
+frontend/.nuxt/
+
+# Android / Gradle
+android/local.properties
+android/keystore.properties
+android/app/google-services.json
+android/build_output.log
+android/**/build/
+android/.gradle/
+android/**/*.jks
+android/**/*.keystore
+android/captures/
+android/.externalNativeBuild/
+
+# Runtime and generated data
+uploads/*
+!uploads/.gitkeep
+backups/*
+!backups/.gitkeep
+ssl/*
+!ssl/.gitkeep
+# Phase 2 — LLM model files (~2.5 GB, downloaded via scripts/download_models.sh)
+models/*
+!models/.gitkeep
+*.pid
+*.seed
+*.pid.lock
+
+# Backup and temporary files
+*.bak
+*.backup
+*.tmp
+*.temp
+*.orig
+*.rej
+
+# Coverage reports
+coverage/
+.coverage
+coverage.xml
+*.cover
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Runtime and generated data
+docker-compose.test.yml
+scripts/run-container-tests.sh
+SHREEONE_PROJECT_PLAN.md
+CLAUDE.md
+docs/

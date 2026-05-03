@@ -3,6 +3,9 @@ import api from './api';
 export const getAIStatus = () =>
   api.get('/ai/status').then(r => r.data);
 
+export const testAIConnection = () =>
+  api.post('/ai/test-connection').then(r => r.data);
+
 export const categorizeTransaction = (description) =>
   api.post('/ai/categorize', { description }).then(r => r.data);
 

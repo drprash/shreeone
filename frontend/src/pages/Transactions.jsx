@@ -103,7 +103,7 @@ const Transactions = () => {
   });
 
   const aiStatus = useAIStatus();
-  const aiAvailable = aiStatus.ai_service_available;
+  const aiAvailable = aiStatus.ai_services_enabled;
   const [aiSuggestion, setAiSuggestion] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const receiptInputRef = useRef(null);

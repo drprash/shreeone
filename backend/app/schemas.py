@@ -431,13 +431,16 @@ class FamilyPreferenceUpdate(BaseModel):
     ai_weekly_digest_enabled: Optional[bool] = None
     ai_receipt_ocr_enabled: Optional[bool] = None
     ai_voice_entry_enabled: Optional[bool] = None
-    # AI provider selection (NULL = use server default)
+    ai_statement_upload_enabled: Optional[bool] = None
     ai_provider: Optional[str] = None     # "local" | "openai" | "anthropic" | "google"
     ai_model_override: Optional[str] = None
+    ai_services_enabled: Optional[bool] = None
 
 class FamilyPreferenceResponse(FamilyPreferenceBase):
     id: UUID
     family_id: UUID
+    # AI master switch
+    ai_services_enabled: bool = False
     # AI feature flags
     ai_categorization_enabled: bool = True
     ai_monthly_narrative_enabled: bool = True
@@ -544,6 +547,7 @@ class DashboardDataWithCountry(DashboardData):
 
 class AIStatusResponse(BaseModel):
     ai_service_available: bool
+    ai_services_enabled: bool = True
     ai_categorization_enabled: bool
     ai_monthly_narrative_enabled: bool
     ai_weekly_digest_enabled: bool
@@ -553,6 +557,16 @@ class AIStatusResponse(BaseModel):
     ai_provider: str = "local"           # effective provider: local | openai | anthropic | google
     ai_model: str = ""                   # effective model name in use
     configured_providers: list[str] = [] # providers with API keys configured on this server
+
+
+class AIProviderTestResult(BaseModel):
+    provider: str
+    success: bool
+    error: Optional[str] = None
+
+
+class AITestConnectionResponse(BaseModel):
+    results: List[AIProviderTestResult] = []
 
 
 class CategorizationRequest(BaseModel):

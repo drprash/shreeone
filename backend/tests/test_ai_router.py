@@ -434,3 +434,129 @@ class TestNarratives:
         c = _build_client(db=db)
         r = c.post(f"/api/ai/narratives/{NARRATIVE_ID}/dismiss")
         assert r.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# POST /ai/test-connection
+# ---------------------------------------------------------------------------
+
+def _mock_admin_user():
+    u = MagicMock(spec=models.User)
+    u.family_id = FAMILY_ID
+    u.id = uuid.uuid4()
+    u.role = models.Role.ADMIN
+    return u
+
+
+def _mock_member_user():
+    u = MagicMock(spec=models.User)
+    u.family_id = FAMILY_ID
+    u.id = uuid.uuid4()
+    u.role = models.Role.MEMBER
+    return u
+
+
+def _build_client_with_role(role: str, db=None):
+    """Build a TestClient where the current user has the given role."""
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    if role == "admin":
+        mock_user = _mock_admin_user()
+        app.dependency_overrides[auth.get_current_user] = lambda: mock_user
+        app.dependency_overrides[auth.get_current_admin] = lambda: mock_user
+    else:
+        mock_user = _mock_member_user()
+        app.dependency_overrides[auth.get_current_user] = lambda: mock_user
+        # get_current_admin is NOT overridden — it will run and raise 403
+    app.dependency_overrides[get_db] = lambda: (db if db is not None else _mock_db())
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_test_connection_requires_admin():
+    """Non-admin cannot call test-connection."""
+    c = _build_client_with_role("member")
+    resp = c.post("/api/ai/test-connection")
+    assert resp.status_code == 403
+
+
+def test_test_connection_returns_results():
+    """test-connection returns a result list with provider entries."""
+    c = _build_client_with_role("admin")
+    with patch("app.routers.ai.get_configured_providers", return_value=["local"]), \
+         patch("app.routers.ai.build_backend_for_provider") as mock_build:
+        mock_backend = MagicMock()
+        mock_backend.complete.return_value = "pong"
+        mock_build.return_value = mock_backend
+        resp = c.post("/api/ai/test-connection")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "results" in data
+    assert len(data["results"]) == 1
+    assert data["results"][0]["provider"] == "local"
+    assert data["results"][0]["success"] is True
+
+
+def test_test_connection_captures_failure():
+    """test-connection marks provider as failed if complete() raises."""
+    c = _build_client_with_role("admin")
+    with patch("app.routers.ai.get_configured_providers", return_value=["openai"]), \
+         patch("app.routers.ai.build_backend_for_provider") as mock_build:
+        mock_backend = MagicMock()
+        mock_backend.complete.side_effect = Exception("Invalid API key")
+        mock_build.return_value = mock_backend
+        resp = c.post("/api/ai/test-connection")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["results"][0]["success"] is False
+    assert "Invalid API key" in data["results"][0]["error"]
+
+
+def test_test_connection_handles_none_response():
+    """test-connection marks provider failed if complete() returns None."""
+    c = _build_client_with_role("admin")
+    with patch("app.routers.ai.get_configured_providers", return_value=["openai"]), \
+         patch("app.routers.ai.build_backend_for_provider") as mock_build:
+        mock_backend = MagicMock()
+        mock_backend.complete.return_value = None
+        mock_build.return_value = mock_backend
+        resp = c.post("/api/ai/test-connection")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["results"][0]["success"] is False
+    assert data["results"][0]["error"] == "No response from provider"
+
+
+# ---------------------------------------------------------------------------
+# ai_services_enabled field in /ai/status
+# ---------------------------------------------------------------------------
+
+def test_ai_status_includes_services_enabled():
+    """GET /ai/status must include ai_services_enabled field."""
+    prefs = MagicMock(spec=models.FamilyPreference)
+    prefs.ai_services_enabled = True
+    prefs.ai_categorization_enabled = True
+    prefs.ai_monthly_narrative_enabled = True
+    prefs.ai_weekly_digest_enabled = True
+    prefs.ai_receipt_ocr_enabled = True
+    prefs.ai_voice_entry_enabled = True
+    prefs.ai_statement_upload_enabled = True
+    c = _build_client(db=_mock_db(prefs=prefs))
+    with patch("app.services.ai_service.is_available", return_value=True):
+        resp = c.get("/api/ai/status")
+    assert resp.status_code == 200
+    assert "ai_services_enabled" in resp.json()
+    assert isinstance(resp.json()["ai_services_enabled"], bool)
+
+
+def test_categorize_blocked_when_services_disabled():
+    """Categorization returns 403 when ai_services_enabled=False."""
+    prefs = MagicMock(spec=models.FamilyPreference)
+    prefs.ai_services_enabled = False
+    prefs.ai_categorization_enabled = True
+    db = _mock_db(prefs=prefs)
+    with patch("app.services.ai_service.is_available", return_value=True):
+        resp = _build_client(db=db).post(
+            "/api/ai/categorize", json={"description": "test purchase"}
+        )
+    assert resp.status_code == 403
+    assert "disabled" in resp.json()["detail"].lower()

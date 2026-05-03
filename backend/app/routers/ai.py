@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app import auth, crud, models, schemas
 from app.database import get_db
 from app.services import ai_service
+from app.services.llm_backends.factory import build_backend_for_provider, get_configured_providers
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,24 @@ def _require_feature(prefs: Optional[models.FamilyPreference], flag: str):
             detail=f"AI feature '{flag}' is disabled for this family."
         )
 
+
+def _require_ai_enabled(prefs: Optional[models.FamilyPreference]):
+    if prefs is None:
+        return  # no prefs row → default enabled
+    if not prefs.ai_services_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI services are disabled for this family."
+        )
+
+
 @router.get("/status", response_model=schemas.AIStatusResponse)
 def ai_status(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
     """Return AI service availability, per-family feature flags, and provider info."""
-    from app.services.llm_backends.factory import get_backend, get_effective_provider, get_configured_providers
+    from app.services.llm_backends.factory import get_backend, get_effective_provider
     from app.config import settings as app_settings
 
     available = ai_service.is_available(family_id=current_user.family_id, db=db)
@@ -58,6 +70,7 @@ def ai_status(
 
     return schemas.AIStatusResponse(
         ai_service_available=available,
+        ai_services_enabled=bool(prefs.ai_services_enabled) if prefs is not None else True,
         ai_categorization_enabled=flag("ai_categorization_enabled"),
         ai_monthly_narrative_enabled=flag("ai_monthly_narrative_enabled"),
         ai_weekly_digest_enabled=flag("ai_weekly_digest_enabled"),
@@ -69,6 +82,47 @@ def ai_status(
         configured_providers=get_configured_providers(app_settings),
     )
 
+def _format_provider_error(provider: str, exc: Exception) -> str:
+    msg = str(exc).lower()
+    if provider == "local" and ("connection refused" in msg or "connect" in msg):
+        return "Ollama is not running — start with: docker compose --profile ollama up -d"
+    if "invalid" in msg and "key" in msg:
+        return "Invalid API key"
+    if "timeout" in msg or "timed out" in msg:
+        return "Connection timed out"
+    if "authentication" in msg or "auth" in msg:
+        return "Invalid API key"
+    return f"Connection failed: {str(exc)}"
+
+
+@router.post("/test-connection", response_model=schemas.AITestConnectionResponse)
+def test_connection(
+    current_user: models.User = Depends(auth.get_current_admin),
+):
+    """Test all server-configured AI providers. Admin only. No state saved."""
+    from app.config import settings as app_settings
+
+    configured = get_configured_providers(app_settings)
+    results = []
+
+    for provider in configured:
+        try:
+            backend = build_backend_for_provider(provider)
+            raw = backend.complete("Hi", max_tokens=1)
+            success = raw is not None
+            error = None if success else "No response from provider"
+        except Exception as exc:
+            success = False
+            error = _format_provider_error(provider, exc)
+        results.append(schemas.AIProviderTestResult(
+            provider=provider,
+            success=success,
+            error=error,
+        ))
+
+    return schemas.AITestConnectionResponse(results=results)
+
+
 @router.post("/categorize", response_model=schemas.CategorizationResponse)
 def categorize_transaction(
     payload: schemas.CategorizationRequest,
@@ -77,6 +131,7 @@ def categorize_transaction(
 ):
     """Suggest a category for a transaction description."""
     prefs = _get_ai_prefs(db, current_user.family_id)
+    _require_ai_enabled(prefs)
     _require_feature(prefs, "ai_categorization_enabled")
 
     if not ai_service.is_available(family_id=current_user.family_id, db=db):
@@ -121,6 +176,7 @@ async def parse_receipt(
     Accepts JPEG, PNG, WEBP.
     """
     prefs = _get_ai_prefs(db, current_user.family_id)
+    _require_ai_enabled(prefs)
     _require_feature(prefs, "ai_receipt_ocr_enabled")
 
     allowed_types = {"image/jpeg", "image/png", "image/webp"}
@@ -174,6 +230,7 @@ async def parse_voice(
     Accepts webm, ogg, mp4, wav.
     """
     prefs = _get_ai_prefs(db, current_user.family_id)
+    _require_ai_enabled(prefs)
     _require_feature(prefs, "ai_voice_entry_enabled")
 
     allowed_types = {"audio/webm", "audio/ogg", "audio/mp4", "audio/wav", "audio/mpeg"}
@@ -223,6 +280,7 @@ def parse_voice_text(
     and extract a transaction draft using the LLM.
     """
     prefs = _get_ai_prefs(db, current_user.family_id)
+    _require_ai_enabled(prefs)
     _require_feature(prefs, "ai_voice_entry_enabled")
 
     if not ai_service.is_available(family_id=current_user.family_id, db=db):
@@ -265,6 +323,7 @@ async def parse_statement(
     """
     from fastapi import Form as FastAPIForm
     prefs = _get_ai_prefs(db, current_user.family_id)
+    _require_ai_enabled(prefs)
     _require_feature(prefs, "ai_statement_upload_enabled")
 
     allowed_types = {

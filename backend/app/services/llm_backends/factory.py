@@ -57,6 +57,12 @@ def _build_backend(provider: str, settings):
             return OllamaBackend(settings)
 
 
+def build_backend_for_provider(provider: str):
+    """Build a backend instance for a specific provider using server settings. Used by test-connection."""
+    from app.config import settings
+    return _build_backend(provider, settings)
+
+
 def get_effective_provider(family_id=None, db=None) -> str:
     """Return the provider name that will be used for the given family."""
     from app.config import settings

@@ -84,7 +84,7 @@ echo ""
 info "This script will:"
 echo "  1. Check / install Docker and Docker Compose"
 echo "  2. Configure environment variables"
-echo "  3. Optionally download AI model files (Gemma 4 E4B, ~4.7 GB)"
+echo "  3. Optionally configure AI features (local Ollama or cloud provider)"
 echo "  4. Build and start all services"
 echo "  5. Verify the API is healthy"
 echo ""
@@ -296,44 +296,116 @@ FRONTEND_URL=${FRONTEND_URL}
 ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
 REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS}
 
-# ── Local AI (Ollama + Gemma 4 E4B) ───────────────────────────────────────────
-# Internal Docker network address — leave as-is when using docker-compose.ai.yml.
-# Remove or leave empty to disable AI features.
-LLM_BASE_URL=http://llm:11434
-LLM_MODEL=gemma4:e4b
-
-# Seconds to wait for a single LLM inference call before timing out.
-# Gemma 4 E4B needs ~60–90 s on a 4-core machine.
-LLM_TIMEOUT_SECONDS=90
+# ── AI (optional) ─────────────────────────────────────────────────────────────
+# Local Ollama: start with --profile ollama. Defaults are applied automatically.
+# LLM_BASE_URL=http://llm:11434
+# LLM_MODEL=gemma4:e4b
+# LLM_TIMEOUT_SECONDS=90
+# Cloud AI: uncomment the provider(s) you want and set API keys. Multiple providers
+# can be configured — the app will test all and auto-select the best one.
+# OPENAI_API_KEY=
+# OPENAI_MODEL=gpt-4o-mini
+# OPENAI_BASE_URL=
+# ANTHROPIC_API_KEY=
+# ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+# GOOGLE_AI_API_KEY=
+# GOOGLE_AI_MODEL=gemini-2.0-flash
 EOF
 
     success ".env written to ${ENV_FILE}"
 fi
 echo ""
 
-# ── 3. Local AI — optional model download ─────────────────────────────────────
-bold "── Step 3: Local AI Setup (Optional) ───────────────────────"
+# ── 3. AI — optional setup ────────────────────────────────────────────────────
+bold "── Step 3: AI Setup (Optional) ─────────────────────────────"
 echo ""
-info "ShreeOne includes on-device AI features powered by Ollama + Gemma 4 E4B:"
+info "ShreeOne includes optional AI features:"
 echo "  • Transaction auto-categorisation"
 echo "  • Receipt OCR (scan receipts with your camera)"
 echo "  • Voice / smart-text transaction entry"
 echo "  • Monthly narrative & weekly spending digest"
 echo "  • Bank statement import (PDF or image)"
 echo ""
-info "Model: gemma4:e4b  (~4.7 GB, pulled automatically by Ollama)"
-info "The app works fully without AI — you can enable it later."
+info "Two AI options are available:"
+echo "  1) Local Ollama  — on-device, no data leaves your server (gemma4:e4b, ~4.7 GB)"
+echo "  2) Cloud AI      — configure one or more of OpenAI, Anthropic, Google (API key required)"
+echo "  3) Skip          — the app works fully without AI; you can configure it later"
+echo ""
+info "After install, enable AI in the app via Settings → AI Features."
+info "The master toggle will test your connection automatically before activating."
 echo ""
 
 ENABLE_AI=false
-if confirm "Enable AI features? (Ollama will pull the model on first start)" N; then
-    ENABLE_AI=true
-    info "AI enabled. Ollama will pull gemma4:e4b automatically when the stack starts."
-    info "First start may take several minutes while the ~4.7 GB model is downloaded."
-else
-    info "Skipping AI features."
-    info "To enable AI later:  docker compose -f docker-compose.ai.yml up -d --build"
-fi
+read -r -p "$(echo -e "${BOLD}  Choose AI option [1/2/3]:${RESET} ")" ai_choice
+case "${ai_choice:-3}" in
+    1)
+        ENABLE_AI=ollama
+        info "Local Ollama selected. Ollama will pull gemma4:e4b automatically on first start."
+        info "First start may take several minutes while the ~4.7 GB model downloads."
+        ;;
+    2)
+        echo ""
+        bold "  Configure cloud AI providers"
+        info "  You can configure multiple providers — the app tests all of them"
+        info "  and auto-selects the best one when you enable AI in Settings."
+        info "  Press Enter to skip any provider."
+        echo ""
+
+        CONFIGURED_PROVIDERS=()
+
+        bold "  OpenAI"
+        OPENAI_KEY=$(ask "  OPENAI_API_KEY" "" "true")
+        if [[ -n "$OPENAI_KEY" ]]; then
+            OPENAI_MODEL_VAL=$(ask "  Model" "gpt-4o-mini")
+            CONFIGURED_PROVIDERS+=("openai")
+        fi
+        echo ""
+
+        bold "  Anthropic"
+        ANTHROPIC_KEY=$(ask "  ANTHROPIC_API_KEY" "" "true")
+        if [[ -n "$ANTHROPIC_KEY" ]]; then
+            ANTHROPIC_MODEL_VAL=$(ask "  Model" "claude-haiku-4-5-20251001")
+            CONFIGURED_PROVIDERS+=("anthropic")
+        fi
+        echo ""
+
+        bold "  Google"
+        GOOGLE_KEY=$(ask "  GOOGLE_AI_API_KEY" "" "true")
+        if [[ -n "$GOOGLE_KEY" ]]; then
+            GOOGLE_MODEL_VAL=$(ask "  Model" "gemini-2.0-flash")
+            CONFIGURED_PROVIDERS+=("google")
+        fi
+        echo ""
+
+        if [[ ${#CONFIGURED_PROVIDERS[@]} -eq 0 ]]; then
+            warn "  No API keys entered. Skipping cloud AI."
+            info "  To add providers later, edit .env and restart."
+        else
+            {
+                echo ""
+                echo "# ── Cloud AI ────────────────────────────────────────────────────────────────"
+                if [[ -n "${OPENAI_KEY:-}" ]]; then
+                    echo "OPENAI_API_KEY=${OPENAI_KEY}"
+                    echo "OPENAI_MODEL=${OPENAI_MODEL_VAL:-gpt-4o-mini}"
+                fi
+                if [[ -n "${ANTHROPIC_KEY:-}" ]]; then
+                    echo "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
+                    echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL_VAL:-claude-haiku-4-5-20251001}"
+                fi
+                if [[ -n "${GOOGLE_KEY:-}" ]]; then
+                    echo "GOOGLE_AI_API_KEY=${GOOGLE_KEY}"
+                    echo "GOOGLE_AI_MODEL=${GOOGLE_MODEL_VAL:-gemini-2.0-flash}"
+                fi
+            } >> "$ENV_FILE"
+            ENABLE_AI=cloud
+            success "Cloud AI configured: ${CONFIGURED_PROVIDERS[*]}"
+        fi
+        ;;
+    *)
+        info "Skipping AI features."
+        info "To enable later: add AI vars to .env, or run:  ${COMPOSE_CMD} --profile ollama up -d"
+        ;;
+esac
 echo ""
 
 # ── 4. Build and start ────────────────────────────────────────────────────────
@@ -341,13 +413,13 @@ bold "── Step 4: Build & Start Services ────────────
 
 cd "$SCRIPT_DIR"
 
-if [[ "$ENABLE_AI" == "true" ]]; then
-    info "Starting full stack with AI (Ollama + Gemma 4 E4B)..."
-    info "Running: ${COMPOSE_CMD} -f docker-compose.ai.yml up -d --build"
+if [[ "$ENABLE_AI" == "ollama" ]]; then
+    info "Starting full stack with local AI (Ollama + Gemma 4 E4B)..."
+    info "Running: ${COMPOSE_CMD} --profile ollama up -d --build"
     echo ""
-    $COMPOSE_CMD -f docker-compose.ai.yml up -d --build
+    $COMPOSE_CMD --profile ollama up -d --build
 else
-    info "Starting core stack (no AI service)..."
+    info "Starting core stack..."
     info "Running: ${COMPOSE_CMD} up -d --build"
     echo ""
     $COMPOSE_CMD up -d --build
@@ -398,8 +470,15 @@ echo "    ${COMPOSE_CMD} logs -f                                    # stream log
 echo "    ${COMPOSE_CMD} ps                                         # check service status"
 echo "    ${COMPOSE_CMD} down                                       # stop all services"
 echo "    bash scripts/backup.sh                                   # manual database backup"
-echo "    ${COMPOSE_CMD} -f docker-compose.ai.yml up -d --build    # start with AI features (Ollama)"
-echo "    ${COMPOSE_CMD} up -d --build                             # start without AI"
+echo "    ${COMPOSE_CMD} --profile ollama up -d --build            # start with local AI (Ollama)"
+echo "    ${COMPOSE_CMD} up -d --build                             # start without AI (or with cloud AI via .env)"
 echo ""
 info "Register the first admin account by opening the app URL in your browser."
 echo ""
+if [[ "$ENABLE_AI" != "false" ]]; then
+    info "AI keys are configured. To activate AI features after logging in:"
+    echo "    1. Open Settings → AI Features"
+    echo "    2. Turn on the master AI toggle — it tests your connection automatically"
+    echo "    3. Toggle individual features (categorisation, narratives, OCR, etc.) as needed"
+    echo ""
+fi

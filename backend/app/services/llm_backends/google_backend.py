@@ -65,12 +65,4 @@ class GoogleAIBackend:
         return parts
 
     def is_available(self) -> bool:
-        if not self.api_key:
-            return False
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=self.api_key)
-            list(genai.list_models())
-            return True
-        except Exception:
-            return False
+        return bool(self.api_key)

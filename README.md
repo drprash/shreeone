@@ -43,9 +43,9 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 - **Offline-first PWA** — IndexedDB queue, auto-sync on reconnect; installable on Android
 - **Backup & Restore** — HMAC-signed JSON export/import covering all data including goals and AI preferences
 
-### Local AI (optional)
+### AI features (optional)
 
-All inference runs on-device — no data leaves your server.
+Supports a local Ollama model (no data leaves your server) or cloud providers (OpenAI, Anthropic, Google). The app works fully without any AI configured.
 
 | Feature | Description |
 |---|---|
@@ -56,7 +56,7 @@ All inference runs on-device — no data leaves your server.
 | **Monthly Narrative** | 3–4 sentence plain-English summary of the family's monthly finances |
 | **Weekly Digest** | 2-sentence spending summary shown on the Dashboard |
 
-AI features can be toggled individually in **Settings → Preferences → AI Features**.
+AI is controlled via a **master on/off switch** in **Settings → AI Features**. Turning it on triggers a live connection test against all API keys configured in `.env`; the best responding provider is selected automatically. Individual features (categorisation, narratives, receipt OCR, etc.) can be toggled separately once AI is enabled.
 
 ## Tech Stack
 
@@ -67,7 +67,7 @@ AI features can be toggled individually in **Settings → Preferences → AI Fea
 | Auth | JWT (30 min access / 7 day refresh) + WebAuthn passkeys |
 | Database | PostgreSQL 16 |
 | Scheduler | APScheduler (recurring payments at 00:00, token pruning at 01:00, exchange rates at 06:00) |
-| Local AI | Ollama + Gemma 4 E4B (~4.7 GB, pulled automatically) |
+| AI | Ollama + Gemma 4 E4B (local, `--profile ollama`) or OpenAI / Anthropic / Google (cloud); master toggle + per-provider test in Settings |
 | PDF/OCR | pdfplumber (text PDFs), pymupdf (scanned image fallback) |
 | Infrastructure | Docker + Docker Compose, Nginx |
 
@@ -94,8 +94,8 @@ The script will:
    - `DB_PASSWORD` — auto-generate or enter your own
    - `SECRET_KEY` — auto-generate (64 hex chars) or enter your own (min 32 chars)
    - `FRONTEND_URL` — choose localhost, your detected LAN IP, or a custom URL
-3. **Optionally enable AI features** — Ollama pulls the Gemma 4 E4B model (~4.7 GB) automatically on first start. The app works fully without AI; you can enable it later.
-4. **Build and start all services** — runs `docker compose up -d --build` (or the AI variant).
+3. **Optionally configure AI** — choose local Ollama (pulls Gemma 4 E4B, ~4.7 GB, no data leaves your server) or a cloud provider (OpenAI / Anthropic / Google — API key only, no extra service). The app works fully without AI.
+4. **Build and start all services** — runs `docker compose up -d --build` (or `--profile ollama` for local AI).
 5. **Health check** — polls the API until it responds, then prints the app URL.
 
 Open the printed URL and register the first admin account. The first user to register automatically becomes the family Admin and creates the family — no separate setup step is needed.
@@ -130,11 +130,30 @@ Open `http://localhost:5173` and register the first admin account. The first use
 
 ### Option C — Manual setup with AI
 
+**Local AI (Ollama)** — pulls `gemma4:e4b` automatically on first start (~4.7 GB, no data leaves your server):
+
 ```bash
-docker compose -f docker-compose.ai.yml up -d --build
+docker compose --profile ollama up -d --build
 ```
 
-The `docker-compose.ai.yml` adds an `llm` service (Ollama) alongside the core `db`, `backend`, and `frontend` services. Ollama pulls `gemma4:e4b` automatically on first start (~4.7 GB). The backend connects via `LLM_BASE_URL`.
+**Cloud AI (OpenAI / Anthropic / Google)** — no extra service; add the relevant keys to `.env` and start normally:
+
+```dotenv
+# .env — uncomment and fill ONE provider block
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+# OPENAI_MODEL=gpt-4o-mini        # optional override
+
+# LLM_PROVIDER=anthropic
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# LLM_PROVIDER=google
+# GOOGLE_AI_API_KEY=...
+```
+
+```bash
+docker compose up -d --build
+```
 
 ### Accessing from other devices on your LAN
 
@@ -160,9 +179,16 @@ Open Chrome → navigate to the app URL → three-dot menu → **Add to Home scr
 | `FRONTEND_URL` | Yes | `http://localhost:5173` | Base URL of the app; used for CORS and WebAuthn origin/RP-ID validation. Comma-separate multiple origins for CORS (e.g. `http://localhost:5173,http://192.168.1.10:5173`). |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` | JWT access token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | JWT refresh token lifetime |
-| `LLM_BASE_URL` | No | `http://llm:11434` | Ollama server URL (AI features) |
+| `LLM_BASE_URL` | No | `http://llm:11434` | Ollama server URL (used with `--profile ollama`) |
 | `LLM_MODEL` | No | `gemma4:e4b` | Ollama model name |
 | `LLM_TIMEOUT_SECONDS` | No | `90` | LLM inference timeout in seconds |
+| `LLM_PROVIDER` | No | `local` | AI provider: `local` (Ollama), `openai`, `anthropic`, `google` |
+| `OPENAI_API_KEY` | No | — | OpenAI API key |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | OpenAI model name |
+| `ANTHROPIC_API_KEY` | No | — | Anthropic API key |
+| `ANTHROPIC_MODEL` | No | `claude-haiku-4-5-20251001` | Anthropic model name |
+| `GOOGLE_AI_API_KEY` | No | — | Google AI API key |
+| `GOOGLE_AI_MODEL` | No | `gemini-2.0-flash` | Google AI model name |
 
 ## Upgrading
 
@@ -240,8 +266,7 @@ shreeone/
 │   └── Dockerfile
 ├── scripts/
 │   └── backup.sh
-├── docker-compose.yml          # Core stack (db, backend, frontend)
-├── docker-compose.ai.yml       # Full stack with local AI (adds Ollama service)
+├── docker-compose.yml          # Full stack; use --profile ollama to add local AI
 ├── install.sh                  # automated one-step installer
 └── .env.example
 ```

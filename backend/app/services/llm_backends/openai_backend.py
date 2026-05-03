@@ -40,15 +40,4 @@ class OpenAIBackend:
             return None
 
     def is_available(self) -> bool:
-        if not self.api_key:
-            return False
-        try:
-            from openai import OpenAI
-            kwargs = {"api_key": self.api_key, "timeout": 5.0}
-            if self.base_url:
-                kwargs["base_url"] = self.base_url
-            client = OpenAI(**kwargs)
-            client.models.list()
-            return True
-        except Exception:
-            return False
+        return bool(self.api_key)

@@ -80,16 +80,4 @@ class AnthropicBackend:
         return {"role": msg["role"], "content": converted_parts}
 
     def is_available(self) -> bool:
-        if not self.api_key:
-            return False
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.api_key, timeout=5.0)
-            client.messages.create(
-                model=self.model,
-                max_tokens=1,
-                messages=[{"role": "user", "content": "ping"}],
-            )
-            return True
-        except Exception:
-            return False
+        return bool(self.api_key)

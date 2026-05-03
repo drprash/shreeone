@@ -11,7 +11,7 @@ const NarrativeBanner = () => {
   const { data: narratives = [] } = useQuery({
     queryKey: ['ai-narratives'],
     queryFn: getNarratives,
-    enabled: aiStatus.ai_service_available && aiStatus.ai_monthly_narrative_enabled !== false,
+    enabled: aiStatus.ai_services_enabled && aiStatus.ai_monthly_narrative_enabled !== false,
     staleTime: 1000 * 60 * 5,
   });
 

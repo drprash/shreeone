@@ -1,4 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import settingsAPI from '../../services/settingsAPI';
+import { getAIStatus, testAIConnection } from '../../services/aiAPI';
+import { useAuthStore } from '../../store/authStore';
+import { useThemeStore } from '../../store/themeStore';
+import { queryKeys } from '../../utils/queryKeys';
 
 const COMMON_CURRENCIES = [
   { code: 'AED', name: 'UAE Dirham' },
@@ -33,18 +39,12 @@ const COMMON_CURRENCIES = [
   { code: 'USD', name: 'US Dollar' },
   { code: 'ZAR', name: 'South African Rand' },
 ];
-import { useQueryClient } from '@tanstack/react-query';
-import settingsAPI from '../../services/settingsAPI';
-import { getAIStatus } from '../../services/aiAPI';
-import { useAuthStore } from '../../store/authStore';
-import { useThemeStore } from '../../store/themeStore';
-import { queryKeys } from '../../utils/queryKeys';
 
 const AI_PROVIDERS = [
   { id: 'local',     label: 'Local (Ollama)',         model: 'gemma4:e4b' },
-  { id: 'openai',    label: 'OpenAI (GPT-4o-mini)',   model: 'gpt-4o-mini' },
-  { id: 'anthropic', label: 'Anthropic (Claude Haiku)', model: 'claude-haiku-4-5-20251001' },
-  { id: 'google',    label: 'Google (Gemini Flash)',  model: 'gemini-2.0-flash' },
+  { id: 'openai',    label: 'OpenAI',   model: 'gpt-4o-mini' },
+  { id: 'anthropic', label: 'Anthropic', model: 'claude-haiku-4-5-20251001' },
+  { id: 'google',    label: 'Google (Gemini)',  model: 'gemini-2.0-flash' },
 ];
 
 const FamilySettings = () => {
@@ -58,6 +58,9 @@ const FamilySettings = () => {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [aiStatus, setAiStatus] = useState(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResults, setTestResults] = useState(null);
+  const [connectionError, setConnectionError] = useState(null);
 
   // Form states
   const [profileForm, setProfileForm] = useState({
@@ -73,14 +76,15 @@ const FamilySettings = () => {
     show_budget_alerts: true,
     show_net_worth_by_country: true,
     show_member_spending: true,
-    ai_categorization_enabled: false,
-    ai_monthly_narrative_enabled: false,
-    ai_weekly_digest_enabled: false,
-    ai_receipt_ocr_enabled: false,
-    ai_voice_entry_enabled: false,
-    ai_statement_upload_enabled: false,
+    ai_categorization_enabled: true,
+    ai_monthly_narrative_enabled: true,
+    ai_weekly_digest_enabled: true,
+    ai_receipt_ocr_enabled: true,
+    ai_voice_entry_enabled: true,
+    ai_statement_upload_enabled: true,
     ai_provider: null,
     ai_model_override: '',
+    ai_services_enabled: false,
   });
 
   useEffect(() => {
@@ -168,6 +172,49 @@ const FamilySettings = () => {
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to update preferences');
+    }
+  };
+
+  const handleAIToggle = async () => {
+    if (testingConnection) return;
+    if (prefForm.ai_services_enabled) {
+      setPrefForm(prev => ({ ...prev, ai_services_enabled: false }));
+      setTestResults(null);
+      setConnectionError(null);
+      return;
+    }
+
+    setTestingConnection(true);
+    setConnectionError(null);
+    setTestResults(null);
+
+    try {
+      const data = await testAIConnection();
+      if (!data?.results) {
+        setConnectionError('Unexpected response from server — please try again');
+        return;
+      }
+      const resultsMap = {};
+      data.results.forEach(r => { resultsMap[r.provider] = r; });
+      setTestResults(resultsMap);
+
+      const passing = data.results.filter(r => r.success).map(r => r.provider);
+      if (passing.length === 0) {
+        setConnectionError('No AI providers could connect — check API keys in .env');
+        return;
+      }
+
+      const priority = ['openai', 'anthropic', 'google', 'local'];
+      const serverDefault = aiStatus?.ai_provider;
+      const selected = passing.includes(serverDefault)
+        ? serverDefault
+        : priority.find(p => passing.includes(p));
+
+      setPrefForm(prev => ({ ...prev, ai_services_enabled: true, ai_provider: selected }));
+    } catch (err) {
+      setConnectionError('Failed to test connection — please try again');
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -352,152 +399,197 @@ const FamilySettings = () => {
             </label>
           </div>
 
-          <div className="mt-6">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">AI Features</h3>
-            {!aiStatus?.ai_service_available ? (
-              <div className="mt-2 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 dark:text-slate-400 text-sm">
-                AI service is not running. Start the AI Docker service (<code className="font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">docker compose -f docker-compose.ai.yml up -d</code>) to enable AI features.
-              </div>
-            ) : (
-              <>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
-                  Enable or disable individual AI-powered features.
-                </p>
-                <div className="space-y-3">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={prefForm.ai_categorization_enabled}
-                      onChange={(e) => setPrefForm({ ...prefForm, ai_categorization_enabled: e.target.checked })}
-                      className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
-                    />
-                    <div>
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">Auto-categorisation</span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Suggest a category when adding transactions</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={prefForm.ai_voice_entry_enabled}
-                      onChange={(e) => setPrefForm({ ...prefForm, ai_voice_entry_enabled: e.target.checked })}
-                      className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
-                    />
-                    <div>
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">Voice / Smart Entry</span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Parse natural language into transaction fields</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={prefForm.ai_receipt_ocr_enabled}
-                      onChange={(e) => setPrefForm({ ...prefForm, ai_receipt_ocr_enabled: e.target.checked })}
-                      className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
-                    />
-                    <div>
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">Receipt Scan (OCR)</span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Extract transaction details from receipt photos</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={prefForm.ai_statement_upload_enabled}
-                      onChange={(e) => setPrefForm({ ...prefForm, ai_statement_upload_enabled: e.target.checked })}
-                      className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
-                    />
-                    <div>
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">Bank Statement Upload</span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Import transactions from PDF or image statements</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={prefForm.ai_monthly_narrative_enabled}
-                      onChange={(e) => setPrefForm({ ...prefForm, ai_monthly_narrative_enabled: e.target.checked })}
-                      className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
-                    />
-                    <div>
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">Monthly Finance Summary</span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Generate a plain-English narrative of monthly spending</p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={prefForm.ai_weekly_digest_enabled}
-                      onChange={(e) => setPrefForm({ ...prefForm, ai_weekly_digest_enabled: e.target.checked })}
-                      className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
-                    />
-                    <div>
-                      <span className="text-slate-700 dark:text-slate-300 font-medium">Weekly Spending Digest</span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Generate a brief weekly summary on the Dashboard</p>
-                    </div>
-                  </label>
-                </div>
-              </>
-            )}
-          </div>
-
-          {aiStatus?.ai_service_available && (
+          {isAdmin && (
             <div className="mt-6">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">AI Provider</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">AI Services</h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
-                Choose which AI service processes your data. API keys are configured by your admin.
+                Enable AI features powered by a cloud or local provider. API keys are configured in <code className="font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">.env</code>.
               </p>
-              <div className="space-y-2">
-                {AI_PROVIDERS.map((p) => {
-                  const configured = aiStatus.configured_providers?.includes(p.id);
-                  return (
-                    <label
-                      key={p.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
-                        configured
-                          ? 'border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                          : 'border-slate-100 dark:border-slate-800 opacity-50 cursor-not-allowed'
-                      }`}
-                      title={!configured ? 'API key not configured — contact your admin' : undefined}
-                    >
+
+              {/* Master toggle */}
+              <div className="flex items-center justify-between p-4 border border-slate-200 dark:border-slate-700 rounded-lg mb-4">
+                <div>
+                  <span className="font-medium text-slate-700 dark:text-slate-300">Enable AI Services</span>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Powers all AI features below</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAIToggle}
+                  disabled={testingConnection}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${prefForm.ai_services_enabled ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-600'}`}
+                  aria-label="Toggle AI services"
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${prefForm.ai_services_enabled ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+
+              {/* Spinner during test */}
+              {testingConnection && (
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-3">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600" />
+                  Testing provider connections…
+                </div>
+              )}
+
+              {/* Connection error */}
+              {connectionError && (
+                <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
+                  {connectionError}
+                </div>
+              )}
+
+              {/* Provider selector — always visible to admin */}
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">AI Provider</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                  Only providers with API keys configured on the server are available.
+                </p>
+                <div className="space-y-2">
+                  {AI_PROVIDERS.map((p) => {
+                    const configured = aiStatus?.configured_providers?.includes(p.id) || p.id === 'local';
+                    const testPassed = testResults ? testResults[p.id]?.success : null;
+                    const testError = testResults ? testResults[p.id]?.error : null;
+                    const isSelectable = configured && (testResults === null || testPassed === true);
+                    return (
+                      <label
+                        key={p.id}
+                        className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                          isSelectable
+                            ? 'border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                            : 'border-slate-100 dark:border-slate-800 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="ai_provider"
+                          value={p.id}
+                          checked={(prefForm.ai_provider ?? aiStatus?.ai_provider ?? 'local') === p.id}
+                          onChange={() => isSelectable && setPrefForm(prev => ({ ...prev, ai_provider: p.id }))}
+                          disabled={!isSelectable}
+                          className="mt-0.5 w-4 h-4 dark:bg-slate-700 dark:border-slate-600"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-700 dark:text-slate-300 font-medium">{p.label}</span>
+                            {testResults && testPassed === true && (
+                              <span className="text-xs text-green-600 dark:text-green-400 font-medium">✓ Connected</span>
+                            )}
+                            {testResults && testPassed === false && (
+                              <span className="text-xs text-red-500 dark:text-red-400 font-medium">✗ Failed</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Default model: {p.model}
+                            {!configured && ' — API key not configured'}
+                            {testError && ` — ${testError}`}
+                          </p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Model override <span className="text-slate-400 font-normal">(optional — leave blank for provider default)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={prefForm.ai_model_override || ''}
+                    onChange={(e) => setPrefForm(prev => ({ ...prev, ai_model_override: e.target.value || null }))}
+                    placeholder="e.g. gpt-4o, claude-opus-4-6, gemini-2.0-pro"
+                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-indigo-500 dark:bg-slate-700 dark:text-slate-100 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Individual feature toggles — only when AI is enabled */}
+              {prefForm.ai_services_enabled && (
+                <div>
+                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Features</h4>
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3 cursor-pointer">
                       <input
-                        type="radio"
-                        name="ai_provider"
-                        value={p.id}
-                        checked={(prefForm.ai_provider ?? aiStatus?.ai_provider ?? 'local') === p.id}
-                        onChange={() => configured && setPrefForm({ ...prefForm, ai_provider: p.id })}
-                        disabled={!configured}
-                        className="mt-0.5 w-4 h-4 dark:bg-slate-700 dark:border-slate-600"
+                        type="checkbox"
+                        checked={prefForm.ai_categorization_enabled}
+                        onChange={(e) => setPrefForm(prev => ({ ...prev, ai_categorization_enabled: e.target.checked }))}
+                        className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
                       />
                       <div>
-                        <span className="text-slate-700 dark:text-slate-300 font-medium">{p.label}</span>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Default model: {p.model}
-                          {!configured && ' — API key not configured'}
-                        </p>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">Auto-categorisation</span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Suggest a category when adding transactions</p>
                       </div>
                     </label>
-                  );
-                })}
-              </div>
 
-              <div className="mt-3">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Model override <span className="text-slate-400 font-normal">(optional — leave blank for provider default)</span>
-                </label>
-                <input
-                  type="text"
-                  value={prefForm.ai_model_override || ''}
-                  onChange={(e) => setPrefForm({ ...prefForm, ai_model_override: e.target.value || null })}
-                  placeholder="e.g. gpt-4o, claude-opus-4-6, gemini-2.0-pro"
-                  className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-indigo-500 dark:bg-slate-700 dark:text-slate-100 text-sm"
-                />
-              </div>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={prefForm.ai_voice_entry_enabled}
+                        onChange={(e) => setPrefForm(prev => ({ ...prev, ai_voice_entry_enabled: e.target.checked }))}
+                        className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
+                      />
+                      <div>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">Voice / Smart Entry</span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Parse natural language into transaction fields</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={prefForm.ai_receipt_ocr_enabled}
+                        onChange={(e) => setPrefForm(prev => ({ ...prev, ai_receipt_ocr_enabled: e.target.checked }))}
+                        className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
+                      />
+                      <div>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">Receipt Scan (OCR)</span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Extract transaction details from receipt photos</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={prefForm.ai_statement_upload_enabled}
+                        onChange={(e) => setPrefForm(prev => ({ ...prev, ai_statement_upload_enabled: e.target.checked }))}
+                        className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
+                      />
+                      <div>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">Bank Statement Upload</span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Import transactions from PDF or image statements</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={prefForm.ai_monthly_narrative_enabled}
+                        onChange={(e) => setPrefForm(prev => ({ ...prev, ai_monthly_narrative_enabled: e.target.checked }))}
+                        className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
+                      />
+                      <div>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">Monthly Finance Summary</span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Generate a plain-English narrative of monthly spending</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={prefForm.ai_weekly_digest_enabled}
+                        onChange={(e) => setPrefForm(prev => ({ ...prev, ai_weekly_digest_enabled: e.target.checked }))}
+                        className="w-4 h-4 rounded dark:bg-slate-700 dark:border-slate-600"
+                      />
+                      <div>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium">Weekly Spending Digest</span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Generate a brief weekly summary on the Dashboard</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

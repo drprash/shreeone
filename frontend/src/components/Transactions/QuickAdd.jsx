@@ -20,7 +20,7 @@ function getQAConversionRate(from, to) {
 const QuickAdd = ({ accounts, categories, baseCurrency }) => {
   const [isTransfer, setIsTransfer] = useState(false);
   const aiStatus = useAIStatus();
-  const aiAvailable = aiStatus.ai_service_available;
+  const aiAvailable = aiStatus.ai_services_enabled;
 
   // AI state
   const [aiSuggestion, setAiSuggestion] = useState(null);   // { category, category_id, confidence }

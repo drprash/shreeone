@@ -28,6 +28,7 @@ def _apply_schema_migrations():
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_statement_upload_enabled BOOLEAN NOT NULL DEFAULT TRUE",
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(20) DEFAULT NULL",
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_model_override VARCHAR(100) DEFAULT NULL",
+        "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_services_enabled BOOLEAN NOT NULL DEFAULT FALSE",
         """CREATE TABLE IF NOT EXISTS ai_narratives (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             family_id UUID NOT NULL REFERENCES families(id),

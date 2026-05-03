@@ -32,6 +32,17 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       FRONTEND_URL: ${FRONTEND_URL}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://llm:11434}
+      LLM_MODEL: ${LLM_MODEL:-gemma4:e4b}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-90}
+      LLM_PROVIDER: ${LLM_PROVIDER:-local}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-openrouter/free}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+      GOOGLE_AI_MODEL: ${GOOGLE_AI_MODEL:-gemini-2.0-flash}
     networks:
       - shreeone-network
     depends_on:
@@ -49,10 +60,22 @@ services:
     depends_on:
       - backend
 
+  llm:
+    image: ollama/ollama
+    container_name: shreeone-llm
+    profiles: [ollama]
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c",
+      "ollama serve & sleep 5 && ollama pull gemma4:e4b && wait"]
+    networks:
+      - shreeone-network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  ollama_data:
 
 networks:
   shreeone-network:
     driver: bridge
-

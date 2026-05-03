@@ -351,6 +351,7 @@ class FamilyPreference(Base):
     ai_provider = Column(String(20), nullable=True, default=None)
     # NULL means use the provider's default model
     ai_model_override = Column(String(100), nullable=True, default=None)
+    ai_services_enabled = Column(Boolean, default=False, nullable=False, server_default='false')
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

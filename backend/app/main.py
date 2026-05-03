@@ -99,6 +99,7 @@ def ensure_performance_indexes():
             "CREATE INDEX IF NOT EXISTS idx_transactions_updated_at ON transactions (updated_at)",
             "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(20) DEFAULT NULL",
             "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_model_override VARCHAR(100) DEFAULT NULL",
+            "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_services_enabled BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE goals ADD COLUMN IF NOT EXISTS current_amount NUMERIC(15,2) NOT NULL DEFAULT 0",
             """CREATE TABLE IF NOT EXISTS goal_contributions (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -332,6 +333,12 @@ def generate_goal_narratives_task():
             if not goals:
                 continue
 
+            prefs = db.query(app_models.FamilyPreference).filter(
+                app_models.FamilyPreference.family_id == family.id
+            ).first()
+            if prefs and not getattr(prefs, "ai_services_enabled", True):
+                continue
+
             # Latest net worth snapshot
             snapshot = db.query(app_models.NetWorthSnapshot).filter(
                 app_models.NetWorthSnapshot.family_id == family.id,
@@ -419,7 +426,7 @@ def generate_monthly_narratives_task():
             prefs = db.query(app_models.FamilyPreference).filter(
                 app_models.FamilyPreference.family_id == family.id
             ).first()
-            if prefs and not getattr(prefs, "ai_monthly_narrative_enabled", True):
+            if prefs and (not getattr(prefs, "ai_services_enabled", True) or not getattr(prefs, "ai_monthly_narrative_enabled", True)):
                 continue
             period_data = _build_period_summary(db, family, start_date, end_date)
             if period_data is None:
@@ -473,7 +480,7 @@ def generate_weekly_digests_task():
             prefs = db.query(app_models.FamilyPreference).filter(
                 app_models.FamilyPreference.family_id == family.id
             ).first()
-            if prefs and not getattr(prefs, "ai_weekly_digest_enabled", True):
+            if prefs and (not getattr(prefs, "ai_services_enabled", True) or not getattr(prefs, "ai_weekly_digest_enabled", True)):
                 continue
             period_data = _build_period_summary(db, family, start_date, end_date)
             if period_data is None:

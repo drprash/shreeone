@@ -147,15 +147,19 @@ const Dashboard = () => {
       {showNetWorthByCountry && (
         <div className="mb-6">
           <React.Suspense fallback={<div className="h-32" />}>
-            <CountryBreakdownWidget />
+            <CountryBreakdownWidget selectedMemberId={selectedMemberId} />
           </React.Suspense>
         </div>
       )}
 
-      {/* Net Worth Timeline — Phase 4 */}
+      {/* Net Worth Timeline */}
       <div className="mb-6">
         <React.Suspense fallback={<div className="h-48 bg-white dark:bg-slate-800 rounded-xl animate-pulse" />}>
-          <NetWorthChart baseCurrency={dashboardData?.summary?.base_currency} />
+          <NetWorthChart
+            baseCurrency={dashboardData?.summary?.base_currency}
+            selectedMemberId={selectedMemberId}
+            currentNetWorth={summaryData?.total_net_worth}
+          />
         </React.Suspense>
       </div>
 

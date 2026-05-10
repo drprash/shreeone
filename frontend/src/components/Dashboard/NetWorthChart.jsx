@@ -2,9 +2,10 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
 import { formatCurrency } from '../../utils/formatters';
+import { useAuthStore } from '../../store/authStore';
 
-function fetchNetWorthHistory(months) {
-  return api.get('/dashboard/net-worth-history', { params: { months } }).then(r => r.data);
+function fetchNetWorthHistory(params) {
+  return api.get('/dashboard/net-worth-history', { params }).then(r => r.data);
 }
 
 function MiniLineChart({ points, width = 500, height = 120, baseCurrency }) {
@@ -67,10 +68,17 @@ function MiniLineChart({ points, width = 500, height = 120, baseCurrency }) {
   );
 }
 
-export default function NetWorthChart({ baseCurrency = 'USD' }) {
+export default function NetWorthChart({ baseCurrency = 'USD', selectedMemberId = 'family', currentNetWorth }) {
+  const { user } = useAuthStore();
+  const isAdminMemberView = user?.role === 'ADMIN' && selectedMemberId !== 'family';
+
   const { data = [], isLoading, isError } = useQuery({
-    queryKey: ['net-worth-history'],
-    queryFn: () => fetchNetWorthHistory(12),
+    queryKey: ['net-worth-history', user?.id, selectedMemberId],
+    queryFn: () => {
+      const params = { months: 12 };
+      if (isAdminMemberView) params.member_id = selectedMemberId;
+      return fetchNetWorthHistory(params);
+    },
     staleTime: 5 * 60 * 1000,
   });
 
@@ -79,6 +87,19 @@ export default function NetWorthChart({ baseCurrency = 'USD' }) {
     queryFn: () => api.get('/dashboard/stale-valuations').then(r => r.data),
     staleTime: 10 * 60 * 1000,
   });
+
+  // Inject live "today" value as the final data point so the chart's latest
+  // figure always matches the net worth tile and country breakdown (both live).
+  const chartData = React.useMemo(() => {
+    if (currentNetWorth == null || data.length === 0) return data;
+    const today = new Date().toISOString().slice(0, 10);
+    const last = data[data.length - 1];
+    const lastDate = String(last.snapshot_date).slice(0, 10);
+    const livePoint = { ...last, snapshot_date: today, total_net_worth: Number(currentNetWorth) };
+    return lastDate === today
+      ? [...data.slice(0, -1), livePoint]   // replace stale today snapshot
+      : [...data, livePoint];               // append when snapshot not yet written
+  }, [data, currentNetWorth]);
 
   if (isLoading) {
     return (
@@ -89,7 +110,7 @@ export default function NetWorthChart({ baseCurrency = 'USD' }) {
     );
   }
 
-  const latest = data.length > 0 ? data[data.length - 1] : null;
+  const latest = chartData.length > 0 ? chartData[chartData.length - 1] : null;
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm p-6 border border-slate-100 dark:border-slate-700">
@@ -109,12 +130,12 @@ export default function NetWorthChart({ baseCurrency = 'USD' }) {
         </p>
       )}
 
-      {isError || data.length === 0 ? (
+      {isError || chartData.length === 0 ? (
         <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-8">
           {isError ? 'Could not load net worth history' : 'No snapshot data yet — check back tomorrow'}
         </p>
       ) : (
-        <MiniLineChart points={data} baseCurrency={baseCurrency} />
+        <MiniLineChart points={chartData} baseCurrency={baseCurrency} />
       )}
 
       {stale.length > 0 && (

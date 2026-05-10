@@ -672,3 +672,107 @@ class FinancialEngine:
             monthly_income_trend=_trend(monthly_income, prev_income),
             monthly_expense_trend=_trend(monthly_expense, prev_expense),
         )
+
+    @staticmethod
+    def compute_net_worth_history(
+        db: Session,
+        accounts: list,
+        snapshots: list,
+        base_currency: str,
+        family_id,
+    ) -> list:
+        """Reconstruct net worth at each snapshot date from account transaction history.
+
+        Used for both non-admin members (privacy-filtered accounts) and admin
+        per-member drill-down (member-owned accounts). Valuation accounts (property,
+        funds) have no transaction history so their current value is used as a proxy.
+        """
+        from collections import defaultdict
+
+        if not accounts:
+            return [
+                schemas.NetWorthSnapshotResponse(
+                    id=s.id,
+                    family_id=s.family_id,
+                    snapshot_date=s.snapshot_date,
+                    total_net_worth=Decimal("0"),
+                    breakdown_json=None,
+                    created_at=s.created_at,
+                )
+                for s in snapshots
+            ]
+
+        account_ids = [a.id for a in accounts]
+
+        all_txs = (
+            db.query(models.Transaction)
+            .filter(
+                models.Transaction.account_id.in_(account_ids),
+                models.Transaction.deleted_at.is_(None),
+            )
+            .all()
+        )
+        txs_by_account: dict = defaultdict(list)
+        for tx in all_txs:
+            txs_by_account[tx.account_id].append(tx)
+
+        rate_cache: dict = {}
+        for account in accounts:
+            if account.currency != base_currency and account.currency not in rate_cache:
+                rate_cache[account.currency] = FinancialEngine.get_exchange_rate(
+                    db, account.currency, base_currency, family_id=family_id
+                )
+
+        result = []
+        for snapshot in snapshots:
+            snapshot_end = datetime.combine(snapshot.snapshot_date, datetime.max.time())
+            net_worth = Decimal("0")
+
+            for account in accounts:
+                is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
+
+                if account.type in models.VALUATION_ACCOUNT_TYPES:
+                    historical_bal = account.current_value or account.current_balance or Decimal("0")
+                else:
+                    tx_sum = Decimal("0")
+                    for tx in txs_by_account.get(account.id, []):
+                        if tx.transaction_date > snapshot_end:
+                            continue
+                        if is_liability:
+                            if tx.type == models.TransactionType.INCOME:
+                                tx_sum -= tx.amount
+                            elif tx.type == models.TransactionType.EXPENSE:
+                                tx_sum += tx.amount
+                            elif tx.type == models.TransactionType.TRANSFER:
+                                tx_sum += tx.amount if tx.is_source_transaction else -tx.amount
+                        else:
+                            if tx.type == models.TransactionType.INCOME:
+                                tx_sum += tx.amount
+                            elif tx.type == models.TransactionType.EXPENSE:
+                                tx_sum -= tx.amount
+                            elif tx.type == models.TransactionType.TRANSFER:
+                                tx_sum += -tx.amount if tx.is_source_transaction else tx.amount
+                    historical_bal = (account.opening_balance or Decimal("0")) + tx_sum
+
+                if account.currency != base_currency:
+                    balance_in_base = historical_bal * rate_cache.get(account.currency, Decimal("1"))
+                else:
+                    balance_in_base = historical_bal
+
+                if is_liability:
+                    net_worth -= balance_in_base
+                else:
+                    net_worth += balance_in_base
+
+            result.append(
+                schemas.NetWorthSnapshotResponse(
+                    id=snapshot.id,
+                    family_id=snapshot.family_id,
+                    snapshot_date=snapshot.snapshot_date,
+                    total_net_worth=net_worth,
+                    breakdown_json=None,
+                    created_at=snapshot.created_at,
+                )
+            )
+
+        return result

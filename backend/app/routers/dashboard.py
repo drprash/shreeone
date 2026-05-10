@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import Optional
 from uuid import UUID
 from decimal import Decimal
 from datetime import date
@@ -26,10 +27,16 @@ def get_summary(
 
 @router.get("/country-breakdown", response_model=schemas.DashboardDataWithCountry)
 def get_dashboard_with_country(
+    member_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Dashboard data extended with a net-worth-by-country breakdown."""
+    """Dashboard data extended with a net-worth-by-country breakdown.
+
+    - Admin, no member_id: all family accounts.
+    - Admin + member_id: that member's personal accounts only.
+    - Non-admin member: privacy-level-filtered accounts (same as net worth tile).
+    """
     from app.exchange_rate_service import get_stored_rate
     from sqlalchemy import or_
 
@@ -44,7 +51,15 @@ def get_dashboard_with_country(
         models.Account.family_id == family_id,
         models.Account.deleted_at.is_(None),
     )
-    if current_user.role != models.Role.ADMIN:
+    if current_user.role == models.Role.ADMIN and member_id is not None:
+        member = db.query(models.User).filter(
+            models.User.id == member_id,
+            models.User.family_id == family_id,
+        ).first()
+        if not member:
+            raise HTTPException(status_code=404, detail="Member not found")
+        account_q = account_q.filter(models.Account.owner_user_id == member_id)
+    elif current_user.role != models.Role.ADMIN:
         if privacy_level == models.PrivacyLevel.PRIVATE:
             account_q = account_q.filter(models.Account.owner_user_id == current_user.id)
         elif privacy_level == models.PrivacyLevel.SHARED:
@@ -123,13 +138,21 @@ def get_dashboard_with_country(
 @router.get("/net-worth-history", response_model=list[schemas.NetWorthSnapshotResponse])
 def net_worth_history(
     months: int = 12,
+    member_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Return the last N months of daily net worth snapshots for the current family."""
+    """Return the last N months of net worth snapshots.
+
+    - Admin, no member_id: pre-computed family totals.
+    - Admin + member_id: reconstructed history for that specific member.
+    - Non-admin member: reconstructed history for their own privacy-filtered accounts.
+    """
     from datetime import timedelta, datetime as dt
+    from sqlalchemy import or_
+
     cutoff = dt.utcnow().date() - timedelta(days=months * 31)
-    return (
+    snapshots = (
         db.query(models.NetWorthSnapshot)
         .filter(
             models.NetWorthSnapshot.family_id == current_user.family_id,
@@ -138,6 +161,47 @@ def net_worth_history(
         .order_by(models.NetWorthSnapshot.snapshot_date.asc())
         .all()
     )
+
+    if not snapshots:
+        return []
+
+    base_currency = current_user.family.base_currency
+    family_id = current_user.family_id
+
+    # Admin: family-level view (pre-computed) or per-member drill-down
+    if current_user.role == models.Role.ADMIN:
+        if member_id is None:
+            return snapshots
+        member = db.query(models.User).filter(
+            models.User.id == member_id,
+            models.User.family_id == family_id,
+        ).first()
+        if not member:
+            raise HTTPException(status_code=404, detail="Member not found")
+        accounts = db.query(models.Account).filter(
+            models.Account.family_id == family_id,
+            models.Account.owner_user_id == member_id,
+            models.Account.deleted_at.is_(None),
+        ).all()
+        return FinancialEngine.compute_net_worth_history(db, accounts, snapshots, base_currency, family_id)
+
+    # Non-admin member: apply privacy-level filtering, matching the net worth tile
+    privacy_level = current_user.family.privacy_level
+    account_q = db.query(models.Account).filter(
+        models.Account.family_id == family_id,
+        models.Account.deleted_at.is_(None),
+    )
+    if privacy_level == models.PrivacyLevel.PRIVATE:
+        account_q = account_q.filter(models.Account.owner_user_id == current_user.id)
+    elif privacy_level == models.PrivacyLevel.SHARED:
+        account_q = account_q.filter(
+            or_(
+                models.Account.owner_type == models.OwnerType.SHARED,
+                models.Account.owner_user_id == current_user.id,
+            )
+        )
+    accounts = [a for a in account_q.all() if a.include_in_family_overview]
+    return FinancialEngine.compute_net_worth_history(db, accounts, snapshots, base_currency, family_id)
 
 
 @router.get("/stale-valuations", response_model=list[dict])

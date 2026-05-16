@@ -9,6 +9,7 @@ const ACCOUNT_TYPES = [
   { value: 'CASH', label: 'Cash', icon: '💵' },
   { value: 'BANK', label: 'Bank Account', icon: '🏦' },
   { value: 'CREDIT_CARD', label: 'Credit Card', icon: '💳' },
+  { value: 'LOAN', label: 'Loan', icon: '🏛️' },
   { value: 'INVESTMENT', label: 'Investment', icon: '📈' }
 ];
 
@@ -16,6 +17,7 @@ const ACCOUNT_TYPE_TOOLTIPS = {
   BANK: 'Savings accounts, current/checking accounts, NRE accounts, NRO accounts',
   INVESTMENT: 'Fixed deposits (incl. FCNR), mutual funds, stocks, EPF/PPF/NPS, property',
   CREDIT_CARD: 'Credit cards and charge cards in any currency',
+  LOAN: 'Home loans, personal loans, car loans, education loans',
   CASH: 'Physical cash, digital wallets (Paytm, PhonePe, Wise balance)',
 };
 

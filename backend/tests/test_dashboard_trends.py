@@ -358,4 +358,4 @@ class TestDashboardTrends:
         data = FinancialEngine.get_family_dashboard_data(db_session, str(family.id), admin)
 
         assert data.summary.monthly_income == Decimal("100.00")
-        assert data.summary.monthly_income_trend == pytest.approx(100.0)
+        assert data.summary.monthly_income_trend is None

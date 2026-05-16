@@ -402,7 +402,9 @@ const AccountDetail = () => {
                   <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
                   <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
                   <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                  {dateFilter === 'all' && (
+                    <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -439,9 +441,11 @@ const AccountDetail = () => {
                        transaction.type === 'EXPENSE' ? '-' : ''}
                       {formatCurrency(transaction.amount, transaction.currency)}
                     </td>
-                    <td className="hidden sm:table-cell px-3 sm:px-6 py-3 sm:py-4 text-sm text-right text-gray-900 whitespace-nowrap">
-                      {formatCurrency(transaction.runningBalance, account.currency)}
-                    </td>
+                    {dateFilter === 'all' && (
+                      <td className="hidden sm:table-cell px-3 sm:px-6 py-3 sm:py-4 text-sm text-right text-gray-900 whitespace-nowrap">
+                        {formatCurrency(transaction.runningBalance, account.currency)}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

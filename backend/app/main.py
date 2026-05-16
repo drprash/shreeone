@@ -264,17 +264,17 @@ def record_net_worth_snapshot_task():
             base_currency = family.base_currency
             total_net_worth = Decimal("0")
             breakdown = {"cash": 0.0, "bank": 0.0, "investment": 0.0, "property": 0.0, "liability": 0.0}
+            rates_used: dict = {}
 
             for account in accounts:
                 if account.type in app_models.VALUATION_ACCOUNT_TYPES and account.current_value is not None:
                     balance = account.current_value
-                elif account.type in app_models.LIABILITY_ACCOUNT_TYPES:
-                    balance = FinancialEngine.calculate_account_balance(db, str(account.id))
                 else:
-                    balance = account.current_balance or Decimal("0")
+                    balance = FinancialEngine.calculate_account_balance(db, str(account.id))
 
                 if account.currency != base_currency:
                     rate = FinancialEngine.get_exchange_rate(db, account.currency, base_currency, family_id=family.id)
+                    rates_used[account.currency] = float(rate)
                     balance_base = balance * rate
                 else:
                     balance_base = balance
@@ -295,6 +295,7 @@ def record_net_worth_snapshot_task():
                     breakdown["investment"] += float(balance_base)
                     total_net_worth += balance_base
 
+            breakdown["rates"] = rates_used
             snapshot = app_models.NetWorthSnapshot(
                 family_id=family.id,
                 snapshot_date=today,

@@ -104,13 +104,13 @@ def list_account_transactions(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    account = crud.get_account(db, account_id)
+    account = crud.get_account_including_archived(db, account_id)
     if not account or not auth.check_account_access(current_user, account):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found or access denied"
         )
-    
+
     transactions = crud.get_account_transactions(
         db, account_id, skip, limit, start_date, end_date, transaction_type=type
     )
@@ -173,13 +173,13 @@ def bulk_create_transactions(
     Partial success is allowed: failed rows are counted but do not abort the batch.
     """
     created_ids = []
-    failed = 0
+    failures = []
 
-    for item in payload.transactions:
+    for idx, item in enumerate(payload.transactions):
         try:
             account = crud.get_account(db, item.account_id)
             if not account or not auth.check_account_access(current_user, account):
-                failed += 1
+                failures.append(f"Row {idx + 1}: account not found or access denied")
                 continue
 
             tx_in = schemas.TransactionCreate(
@@ -203,13 +203,14 @@ def bulk_create_transactions(
                 new_values=f"bulk_import:{str(item.dict())}",
             )
             created_ids.append(tx_obj.id)
-        except Exception:
-            failed += 1
+        except Exception as e:
+            failures.append(f"Row {idx + 1}: {str(e)}")
 
     return schemas.BulkTransactionResponse(
         created=len(created_ids),
-        failed=failed,
+        failed=len(failures),
         transaction_ids=created_ids,
+        failures=failures,
     )
 
 

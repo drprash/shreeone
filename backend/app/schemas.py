@@ -161,7 +161,7 @@ class AccountUpdate(BaseModel):
     last_valued_at: Optional[datetime] = None
 
 class BalanceAdjustRequest(BaseModel):
-    new_balance: Decimal
+    new_balance: Decimal = Field(..., ge=0)
 
 class AccountResponse(AccountBase):
     id: UUID
@@ -174,6 +174,7 @@ class AccountResponse(AccountBase):
     sort_order: int = 0
     country_code: Optional[str] = None
     created_at: datetime
+    transaction_count: int = 0
 
     @computed_field
     @property
@@ -636,6 +637,7 @@ class BulkTransactionResponse(BaseModel):
     created: int
     failed: int
     transaction_ids: list[UUID]
+    failures: list[str] = []
 
 
 class AINarrativeResponse(BaseModel):

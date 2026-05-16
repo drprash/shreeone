@@ -79,7 +79,12 @@ def get_dashboard_with_country(
         if not account.include_in_family_overview and current_user.role != models.Role.ADMIN:
             continue
 
-        balance = account.current_balance or Decimal("0")
+        if account.type in models.LIABILITY_ACCOUNT_TYPES:
+            balance = FinancialEngine.calculate_account_balance(db, str(account.id))
+        elif account.type in models.VALUATION_ACCOUNT_TYPES and account.current_value is not None:
+            balance = account.current_value
+        else:
+            balance = account.current_balance or Decimal("0")
         if account.currency != base_currency:
             rate = FinancialEngine.get_exchange_rate(
                 db, account.currency, base_currency, family_id=family_id

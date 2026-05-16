@@ -325,6 +325,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
               {[
                 { type: 'BANK', label: 'Bank Accounts' },
                 { type: 'CREDIT_CARD', label: 'Credit Cards' },
+                { type: 'LOAN', label: 'Loans' },
                 { type: 'CASH', label: 'Cash & Wallets' },
                 { type: 'INVESTMENT', label: 'Investments' },
               ].map(group => {
@@ -364,6 +365,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
               {[
                 { type: 'BANK', label: 'Bank Accounts' },
                 { type: 'CREDIT_CARD', label: 'Credit Cards' },
+                { type: 'LOAN', label: 'Loans' },
                 { type: 'CASH', label: 'Cash & Wallets' },
                 { type: 'INVESTMENT', label: 'Investments' },
               ].map(group => {

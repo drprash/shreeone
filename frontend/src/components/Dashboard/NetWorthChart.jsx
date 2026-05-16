@@ -8,6 +8,11 @@ function fetchNetWorthHistory(params) {
   return api.get('/dashboard/net-worth-history', { params }).then(r => r.data);
 }
 
+function parseSnapshotDate(dateStr) {
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function MiniLineChart({ points, width = 500, height = 120, baseCurrency }) {
   if (!points || points.length < 2) return null;
 
@@ -58,11 +63,11 @@ function MiniLineChart({ points, width = 500, height = 120, baseCurrency }) {
         />
       </svg>
       <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500 mt-1 px-2">
-        <span>{new Date(firstPoint.snapshot_date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</span>
+        <span>{parseSnapshotDate(firstPoint.snapshot_date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</span>
         <span className={`font-medium ${isUp ? 'text-emerald-500' : 'text-red-400'}`}>
           {isUp ? '+' : ''}{formatCurrency(delta, baseCurrency)}
         </span>
-        <span>{new Date(lastPoint.snapshot_date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</span>
+        <span>{parseSnapshotDate(lastPoint.snapshot_date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</span>
       </div>
     </div>
   );
@@ -92,7 +97,8 @@ export default function NetWorthChart({ baseCurrency = 'USD', selectedMemberId =
   // figure always matches the net worth tile and country breakdown (both live).
   const chartData = React.useMemo(() => {
     if (currentNetWorth == null || data.length === 0) return data;
-    const today = new Date().toISOString().slice(0, 10);
+    const _d = new Date();
+    const today = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
     const last = data[data.length - 1];
     const lastDate = String(last.snapshot_date).slice(0, 10);
     const livePoint = { ...last, snapshot_date: today, total_net_worth: Number(currentNetWorth) };

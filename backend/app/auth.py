@@ -111,6 +111,8 @@ async def get_current_admin(current_user: models.User = Depends(get_current_user
 
 def check_account_access(user: models.User, account: models.Account) -> bool:
     """Check if user can access an account"""
+    if account.family_id != user.family_id:
+        return False
     if user.role == models.Role.ADMIN:
         return True
     if account.owner_type == models.OwnerType.SHARED:

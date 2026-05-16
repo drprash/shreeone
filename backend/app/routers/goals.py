@@ -32,7 +32,17 @@ def _compute_progress(db: Session, goal: models.Goal) -> schemas.GoalProgress:
     """
     if goal.linked_account_id:
         from app.financial_logic import FinancialEngine
-        current_amount = FinancialEngine.calculate_account_balance(db, str(goal.linked_account_id))
+        from app.models import LIABILITY_ACCOUNT_TYPES
+        balance = FinancialEngine.calculate_account_balance(db, str(goal.linked_account_id))
+        linked_account = db.query(models.Account).filter(
+            models.Account.id == goal.linked_account_id
+        ).first()
+        if linked_account and linked_account.type in LIABILITY_ACCOUNT_TYPES:
+            # For liability accounts, balance = debt owed (positive).
+            # Progress = how much has been paid off = target - remaining debt.
+            current_amount = max(Decimal("0"), goal.target_amount - balance)
+        else:
+            current_amount = balance
     else:
         current_amount = goal.current_amount or Decimal("0")
 

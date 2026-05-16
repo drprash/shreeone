@@ -1,8 +1,11 @@
 export const formatCurrency = (amount, currency = 'USD') => {
+  if (amount == null) return '—';
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '—';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency,
-  }).format(amount);
+  }).format(n || 0);
 };
 
 export const getCurrencySymbol = (currency = 'USD') => {

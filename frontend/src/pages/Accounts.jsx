@@ -15,6 +15,7 @@ import { useCreateAccount, useUpdateAccount, useDeleteAccount } from '../hooks/u
 const ACCOUNT_GROUPS = [
   { type: 'BANK', label: 'Bank Accounts' },
   { type: 'CREDIT_CARD', label: 'Credit Cards' },
+  { type: 'LOAN', label: 'Loans' },
   { type: 'CASH', label: 'Cash & Wallets' },
   { type: 'INVESTMENT', label: 'Investments' },
 ];
@@ -46,6 +47,7 @@ const Accounts = () => {
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [editingAccount, setEditingAccount] = useState(null);
   const [isReordering, setIsReordering] = useState(false);
   const [orderedAccounts, setOrderedAccounts] = useState([]);
@@ -304,9 +306,7 @@ const Accounts = () => {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm('Are you sure you want to delete this account?')) {
-                  deleteAccountMutate(account.id);
-                }
+                setDeleteTarget(account);
               }}
               className="text-gray-400 hover:text-red-600 p-1"
               title="Delete account"
@@ -468,6 +468,7 @@ const Accounts = () => {
                   <option value="BANK">Bank Account</option>
                   <option value="CASH">Cash</option>
                   <option value="CREDIT_CARD">Credit Card</option>
+                  <option value="LOAN">Loan</option>
                   <option value="INVESTMENT">Investment</option>
                 </select>
               </div>
@@ -705,6 +706,65 @@ const Accounts = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete / Archive Account Modal */}
+      {deleteTarget && (
+        <div className="modal-backdrop fixed inset-0 flex items-start sm:items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
+          <div className="glass-panel bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md mx-3 sm:mx-4 p-4 sm:p-6 slide-in">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">
+                {deleteTarget.transaction_count > 0 ? 'Archive Account' : 'Delete Account'}
+              </h2>
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {deleteTarget.transaction_count > 0 ? (
+              <p className="text-gray-600 dark:text-gray-300 mb-6">
+                <span className="font-medium">"{deleteTarget.name}"</span> has{' '}
+                {deleteTarget.transaction_count} transaction
+                {deleteTarget.transaction_count !== 1 ? 's' : ''} and cannot be
+                permanently deleted. It will be archived and removed from your account
+                list. Your transaction history will be preserved and remain visible in
+                the transactions view.
+              </p>
+            ) : (
+              <p className="text-gray-600 dark:text-gray-300 mb-6">
+                Are you sure you want to delete{' '}
+                <span className="font-medium">"{deleteTarget.name}"</span>? This cannot
+                be undone.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const msg = deleteTarget.transaction_count > 0 ? 'Account archived' : undefined;
+                  deleteAccountMutate({ id: deleteTarget.id, successMessage: msg });
+                  setDeleteTarget(null);
+                }}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-lg ${
+                  deleteTarget.transaction_count > 0
+                    ? 'bg-amber-500 hover:bg-amber-600'
+                    : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                {deleteTarget.transaction_count > 0 ? 'Archive Account' : 'Delete Account'}
+              </button>
+            </div>
           </div>
         </div>
       )}

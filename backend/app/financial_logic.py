@@ -131,10 +131,12 @@ class FinancialEngine:
 
     @staticmethod
     def update_account_balance(db: Session, account_id: str):
-        """Update stored balance"""
-        new_balance = FinancialEngine.calculate_account_balance(db, account_id)
-        account = db.query(models.Account).filter(models.Account.id == account_id).first()
+        """Update stored balance — lock the row first to prevent concurrent overwrites."""
+        account = db.query(models.Account).filter(
+            models.Account.id == account_id
+        ).with_for_update().first()
         if account:
+            new_balance = FinancialEngine.calculate_account_balance(db, account_id)
             account.current_balance = new_balance
             db.commit()
 
@@ -538,7 +540,7 @@ class FinancialEngine:
         # 5. Calculate percentage change
         def calculate_trend(current, previous):
             if previous == 0:
-                return 100.0 if current > 0 else 0.0
+                return None
             return float((current - previous) / previous * 100)
 
         summary.monthly_income_trend = calculate_trend(monthly_income, prev_monthly_income)
@@ -656,7 +658,7 @@ class FinancialEngine:
 
         def _trend(current, previous):
             if previous == 0:
-                return 100.0 if current > 0 else 0.0
+                return None
             return float((current - previous) / previous * 100)
 
         return schemas.DashboardSummary(
@@ -704,27 +706,45 @@ class FinancialEngine:
 
         account_ids = [a.id for a in accounts]
 
-        all_txs = (
-            db.query(models.Transaction)
-            .filter(
-                models.Transaction.account_id.in_(account_ids),
-                models.Transaction.deleted_at.is_(None),
-            )
-            .all()
+        last_snapshot_end = None
+        if snapshots:
+            last_snapshot_date = max(s.snapshot_date for s in snapshots)
+            last_snapshot_end = datetime.combine(last_snapshot_date, datetime.max.time())
+
+        tx_query = db.query(models.Transaction).filter(
+            models.Transaction.account_id.in_(account_ids),
+            models.Transaction.deleted_at.is_(None),
         )
+        if last_snapshot_end is not None:
+            tx_query = tx_query.filter(
+                models.Transaction.transaction_date <= last_snapshot_end
+            )
+        all_txs = tx_query.all()
         txs_by_account: dict = defaultdict(list)
         for tx in all_txs:
             txs_by_account[tx.account_id].append(tx)
 
-        rate_cache: dict = {}
+        fallback_rates: dict = {}
         for account in accounts:
-            if account.currency != base_currency and account.currency not in rate_cache:
-                rate_cache[account.currency] = FinancialEngine.get_exchange_rate(
+            if account.currency != base_currency and account.currency not in fallback_rates:
+                fallback_rates[account.currency] = FinancialEngine.get_exchange_rate(
                     db, account.currency, base_currency, family_id=family_id
                 )
 
         result = []
         for snapshot in snapshots:
+            # Build per-snapshot rate cache: start from today's fallback rates,
+            # then override with rates embedded at snapshot creation time so
+            # historical net worth reflects the exchange rate that day, not today.
+            import json as _json
+            rate_cache = fallback_rates.copy()
+            if snapshot.breakdown_json:
+                try:
+                    bd = _json.loads(snapshot.breakdown_json)
+                    for currency, rate in bd.get("rates", {}).items():
+                        rate_cache[currency] = Decimal(str(rate))
+                except Exception:
+                    pass
             snapshot_end = datetime.combine(snapshot.snapshot_date, datetime.max.time())
             net_worth = Decimal("0")
 

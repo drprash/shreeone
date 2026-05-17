@@ -15,25 +15,11 @@ class AccountType(enum.Enum):
     BANK = "BANK"
     CREDIT_CARD = "CREDIT_CARD"
     INVESTMENT = "INVESTMENT"
-    MUTUAL_FUND = "MUTUAL_FUND"
-    STOCK_PORTFOLIO = "STOCK_PORTFOLIO"
-    PROVIDENT_FUND = "PROVIDENT_FUND"
-    PROPERTY = "PROPERTY"
-    FIXED_DEPOSIT = "FIXED_DEPOSIT"
     LOAN = "LOAN"
 
 # Account types that represent liabilities (inverted balance sign convention).
 # Add new liability types here (e.g. LOAN, MORTGAGE) without changing financial logic.
 LIABILITY_ACCOUNT_TYPES: frozenset = frozenset({AccountType.CREDIT_CARD, AccountType.LOAN})
-
-# Account types that use current_value instead of transaction-derived balance
-VALUATION_ACCOUNT_TYPES: frozenset = frozenset({
-    AccountType.MUTUAL_FUND,
-    AccountType.STOCK_PORTFOLIO,
-    AccountType.PROVIDENT_FUND,
-    AccountType.PROPERTY,
-    AccountType.FIXED_DEPOSIT,
-})
 
 class OwnerType(enum.Enum):
     PERSONAL = "PERSONAL"
@@ -183,8 +169,6 @@ class Account(Base):
     include_in_family_overview = Column(Boolean, default=True)
     opening_balance = Column(Numeric(15, 2), default=0)
     current_balance = Column(Numeric(15, 2), default=0)
-    current_value = Column(Numeric(15, 2), nullable=True)
-    last_valued_at = Column(DateTime, nullable=True)
     country_code = Column(String(2), nullable=True)  # ISO 3166-1 alpha-2
     sort_order = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

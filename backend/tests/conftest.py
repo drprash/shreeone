@@ -16,8 +16,8 @@ def _apply_schema_migrations():
     statements = [
         "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS country_code VARCHAR(2)",
-        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS current_value NUMERIC(15,2)",
-        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_valued_at TIMESTAMP",
+        "ALTER TABLE accounts DROP COLUMN IF EXISTS current_value",
+        "ALTER TABLE accounts DROP COLUMN IF EXISTS last_valued_at",
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS show_net_worth_by_country BOOLEAN NOT NULL DEFAULT TRUE",
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS show_member_spending BOOLEAN NOT NULL DEFAULT TRUE",
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_categorization_enabled BOOLEAN NOT NULL DEFAULT TRUE",

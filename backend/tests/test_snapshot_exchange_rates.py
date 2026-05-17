@@ -127,7 +127,7 @@ def test_compute_net_worth_history_uses_embedded_snapshot_rate(db_session):
     # Snapshot with the historical rate embedded (0.012, used the day it was created)
     snapshot = _make_snapshot(db_session, fam, breakdown_dict={
         "cash": 0.0, "bank": 12.0, "investment": 0.0,
-        "property": 0.0, "liability": 0.0,
+        "liability": 0.0,
         "rates": {"INR": "0.012"},
     }, total_nw=Decimal("12.00"))
     db_session.commit()
@@ -157,7 +157,7 @@ def test_compute_net_worth_history_falls_back_to_current_rate_for_pre_fix_snapsh
     # Old-style snapshot: breakdown_json has no "rates" key
     snapshot = _make_snapshot(db_session, fam, breakdown_dict={
         "cash": 0.0, "bank": 15.0, "investment": 0.0,
-        "property": 0.0, "liability": 0.0,
+        "liability": 0.0,
     }, total_nw=Decimal("15.00"))
     db_session.commit()
 

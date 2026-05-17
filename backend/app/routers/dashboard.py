@@ -79,12 +79,7 @@ def get_dashboard_with_country(
         if not account.include_in_family_overview and current_user.role != models.Role.ADMIN:
             continue
 
-        if account.type in models.LIABILITY_ACCOUNT_TYPES:
-            balance = FinancialEngine.calculate_account_balance(db, str(account.id))
-        elif account.type in models.VALUATION_ACCOUNT_TYPES and account.current_value is not None:
-            balance = account.current_value
-        else:
-            balance = account.current_balance or Decimal("0")
+        balance = FinancialEngine.calculate_account_balance(db, str(account.id))
         if account.currency != base_currency:
             rate = FinancialEngine.get_exchange_rate(
                 db, account.currency, base_currency, family_id=family_id
@@ -208,36 +203,6 @@ def net_worth_history(
     accounts = [a for a in account_q.all() if a.include_in_family_overview]
     return FinancialEngine.compute_net_worth_history(db, accounts, snapshots, base_currency, family_id)
 
-
-@router.get("/stale-valuations", response_model=list[dict])
-def stale_valuations(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
-):
-    """Return investment/property accounts that haven't been valued in 30+ days."""
-    from datetime import timedelta, datetime as dt
-    threshold = dt.utcnow() - timedelta(days=30)
-    stale = db.query(models.Account).filter(
-        models.Account.family_id == current_user.family_id,
-        models.Account.deleted_at.is_(None),
-        models.Account.type.in_([
-            models.AccountType.MUTUAL_FUND,
-            models.AccountType.STOCK_PORTFOLIO,
-            models.AccountType.PROVIDENT_FUND,
-            models.AccountType.PROPERTY,
-            models.AccountType.FIXED_DEPOSIT,
-        ]),
-        (models.Account.last_valued_at.is_(None)) | (models.Account.last_valued_at < threshold),
-    ).all()
-    return [
-        {
-            "id": str(a.id),
-            "name": a.name,
-            "type": a.type.value,
-            "last_valued_at": a.last_valued_at.isoformat() if a.last_valued_at else None,
-        }
-        for a in stale
-    ]
 
 
 @router.get("/member/{member_id}", response_model=schemas.DashboardSummary)

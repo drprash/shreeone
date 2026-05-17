@@ -87,12 +87,6 @@ export default function NetWorthChart({ baseCurrency = 'USD', selectedMemberId =
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: stale = [] } = useQuery({
-    queryKey: ['stale-valuations'],
-    queryFn: () => api.get('/dashboard/stale-valuations').then(r => r.data),
-    staleTime: 10 * 60 * 1000,
-  });
-
   // Inject live "today" value as the final data point so the chart's latest
   // figure always matches the net worth tile and country breakdown (both live).
   const chartData = React.useMemo(() => {
@@ -122,11 +116,6 @@ export default function NetWorthChart({ baseCurrency = 'USD', selectedMemberId =
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm p-6 border border-slate-100 dark:border-slate-700">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Net Worth Over Time</h3>
-        {stale.length > 0 && (
-          <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-2 py-1 rounded-full font-medium">
-            {stale.length} account{stale.length > 1 ? 's' : ''} need valuation
-          </span>
-        )}
       </div>
 
       {latest && (
@@ -144,16 +133,6 @@ export default function NetWorthChart({ baseCurrency = 'USD', selectedMemberId =
         <MiniLineChart points={chartData} baseCurrency={baseCurrency} />
       )}
 
-      {stale.length > 0 && (
-        <div className="mt-4 border-t dark:border-slate-700 pt-3">
-          <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Accounts needing a valuation update:</p>
-          <ul className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
-            {stale.map(a => (
-              <li key={a.id}>• {a.name} ({a.type}) — last valued {a.last_valued_at ? new Date(a.last_valued_at).toLocaleDateString() : 'never'}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

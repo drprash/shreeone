@@ -157,9 +157,6 @@ class AccountUpdate(BaseModel):
     include_in_family_overview: Optional[bool] = None
     sort_order: Optional[int] = None
     country_code: Optional[str] = Field(default=None, pattern="^[A-Z]{2}$")
-    current_value: Optional[Decimal] = None
-    last_valued_at: Optional[datetime] = None
-
 class BalanceAdjustRequest(BaseModel):
     new_balance: Decimal = Field(..., ge=0)
 
@@ -169,8 +166,6 @@ class AccountResponse(AccountBase):
     owner_user_id: Optional[UUID]
     owner_name: Optional[str] = None
     current_balance: Decimal
-    current_value: Optional[Decimal] = None
-    last_valued_at: Optional[datetime] = None
     sort_order: int = 0
     country_code: Optional[str] = None
     created_at: datetime

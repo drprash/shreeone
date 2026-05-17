@@ -62,8 +62,8 @@ def ensure_performance_indexes():
                 generated_at TIMESTAMP DEFAULT NOW(),
                 dismissed_at TIMESTAMP
             )""",
-            "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS current_value NUMERIC(15,2)",
-            "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_valued_at TIMESTAMP",
+            "ALTER TABLE accounts DROP COLUMN IF EXISTS current_value",
+            "ALTER TABLE accounts DROP COLUMN IF EXISTS last_valued_at",
             """CREATE TABLE IF NOT EXISTS net_worth_snapshots (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 family_id UUID NOT NULL REFERENCES families(id),
@@ -263,14 +263,11 @@ def record_net_worth_snapshot_task():
 
             base_currency = family.base_currency
             total_net_worth = Decimal("0")
-            breakdown = {"cash": 0.0, "bank": 0.0, "investment": 0.0, "property": 0.0, "liability": 0.0}
+            breakdown = {"cash": 0.0, "bank": 0.0, "investment": 0.0, "liability": 0.0}
             rates_used: dict = {}
 
             for account in accounts:
-                if account.type in app_models.VALUATION_ACCOUNT_TYPES and account.current_value is not None:
-                    balance = account.current_value
-                else:
-                    balance = FinancialEngine.calculate_account_balance(db, str(account.id))
+                balance = FinancialEngine.calculate_account_balance(db, str(account.id))
 
                 if account.currency != base_currency:
                     rate = FinancialEngine.get_exchange_rate(db, account.currency, base_currency, family_id=family.id)
@@ -287,9 +284,6 @@ def record_net_worth_snapshot_task():
                     total_net_worth += balance_base
                 elif account.type == app_models.AccountType.BANK:
                     breakdown["bank"] += float(balance_base)
-                    total_net_worth += balance_base
-                elif account.type == app_models.AccountType.PROPERTY:
-                    breakdown["property"] += float(balance_base)
                     total_net_worth += balance_base
                 else:
                     breakdown["investment"] += float(balance_base)

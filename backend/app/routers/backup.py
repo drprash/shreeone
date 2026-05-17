@@ -416,19 +416,16 @@ async def restore_backup(
             db.execute(text("""
                 INSERT INTO accounts (id, family_id, name, type, currency, owner_type,
                                       owner_user_id, include_in_family_overview,
-                                      opening_balance, current_balance, current_value,
-                                      last_valued_at, country_code,
+                                      opening_balance, current_balance, country_code,
                                       sort_order, created_at, updated_at, deleted_at)
                 VALUES (:id, :family_id, :name, :type, :currency, :owner_type,
                         :owner_user_id, :include_in_family_overview,
-                        :opening_balance, :current_balance, :current_value,
-                        :last_valued_at, :country_code,
+                        :opening_balance, :current_balance, :country_code,
                         :sort_order, :created_at, :updated_at, :deleted_at)
             """), {k: a.get(k) for k in [
                 "id", "family_id", "name", "type", "currency", "owner_type",
                 "owner_user_id", "include_in_family_overview",
-                "opening_balance", "current_balance", "current_value",
-                "last_valued_at", "country_code",
+                "opening_balance", "current_balance", "country_code",
                 "sort_order", "created_at", "updated_at", "deleted_at",
             ]})
 

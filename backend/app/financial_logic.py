@@ -86,11 +86,6 @@ class FinancialEngine:
         if not account:
             return Decimal('0')
 
-        # Valuation-type accounts (mutual funds, property, etc.) use current_value
-        # directly instead of summing transactions.
-        if account.type in models.VALUATION_ACCOUNT_TYPES and account.current_value is not None:
-            return account.current_value
-
         is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
         # For liabilities, flip signs: expenses add to debt, income reduces debt
@@ -323,16 +318,10 @@ class FinancialEngine:
             if not account.include_in_family_overview and user.role != models.Role.ADMIN:
                 continue
 
-            # For liability accounts, recalculate balance to ensure it uses the correct
-            # sign convention (positive = debt). This also self-heals any stale
-            # balances that were computed under the old convention.
-            if account.type in models.LIABILITY_ACCOUNT_TYPES:
-                balance = FinancialEngine.calculate_account_balance(db, str(account.id))
-                if account.current_balance != balance:
-                    account.current_balance = balance
-                    db.commit()
-            else:
-                balance = account.current_balance or Decimal('0')
+            balance = FinancialEngine.calculate_account_balance(db, str(account.id))
+            if account.current_balance != balance:
+                account.current_balance = balance
+                db.commit()
 
             # Convert to base currency if needed
             if account.currency != base_currency:
@@ -352,14 +341,7 @@ class FinancialEngine:
             elif account.type == models.AccountType.BANK:
                 total_bank += balance_in_base
                 total_net_worth += balance_in_base
-            elif account.type in (
-                models.AccountType.INVESTMENT,
-                models.AccountType.MUTUAL_FUND,
-                models.AccountType.STOCK_PORTFOLIO,
-                models.AccountType.PROVIDENT_FUND,
-                models.AccountType.PROPERTY,
-                models.AccountType.FIXED_DEPOSIT,
-            ):
+            elif account.type == models.AccountType.INVESTMENT:
                 total_investments += balance_in_base
                 total_net_worth += balance_in_base
 
@@ -577,13 +559,10 @@ class FinancialEngine:
         total_credit = Decimal('0')
 
         for account in member_accounts:
-            if account.type in models.LIABILITY_ACCOUNT_TYPES:
-                balance = FinancialEngine.calculate_account_balance(db, str(account.id))
-                if account.current_balance != balance:
-                    account.current_balance = balance
-                    db.commit()
-            else:
-                balance = account.current_balance or Decimal('0')
+            balance = FinancialEngine.calculate_account_balance(db, str(account.id))
+            if account.current_balance != balance:
+                account.current_balance = balance
+                db.commit()
 
             if account.currency != base_currency:
                 rate = FinancialEngine.get_exchange_rate(db, account.currency, base_currency, family_id=family_id)
@@ -600,14 +579,7 @@ class FinancialEngine:
             elif account.type == models.AccountType.BANK:
                 total_bank += balance_in_base
                 total_net_worth += balance_in_base
-            elif account.type in (
-                models.AccountType.INVESTMENT,
-                models.AccountType.MUTUAL_FUND,
-                models.AccountType.STOCK_PORTFOLIO,
-                models.AccountType.PROVIDENT_FUND,
-                models.AccountType.PROPERTY,
-                models.AccountType.FIXED_DEPOSIT,
-            ):
+            elif account.type == models.AccountType.INVESTMENT:
                 total_investments += balance_in_base
                 total_net_worth += balance_in_base
 
@@ -751,28 +723,25 @@ class FinancialEngine:
             for account in accounts:
                 is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
-                if account.type in models.VALUATION_ACCOUNT_TYPES:
-                    historical_bal = account.current_value or account.current_balance or Decimal("0")
-                else:
-                    tx_sum = Decimal("0")
-                    for tx in txs_by_account.get(account.id, []):
-                        if tx.transaction_date > snapshot_end:
-                            continue
-                        if is_liability:
-                            if tx.type == models.TransactionType.INCOME:
-                                tx_sum -= tx.amount
-                            elif tx.type == models.TransactionType.EXPENSE:
-                                tx_sum += tx.amount
-                            elif tx.type == models.TransactionType.TRANSFER:
-                                tx_sum += tx.amount if tx.is_source_transaction else -tx.amount
-                        else:
-                            if tx.type == models.TransactionType.INCOME:
-                                tx_sum += tx.amount
-                            elif tx.type == models.TransactionType.EXPENSE:
-                                tx_sum -= tx.amount
-                            elif tx.type == models.TransactionType.TRANSFER:
-                                tx_sum += -tx.amount if tx.is_source_transaction else tx.amount
-                    historical_bal = (account.opening_balance or Decimal("0")) + tx_sum
+                tx_sum = Decimal("0")
+                for tx in txs_by_account.get(account.id, []):
+                    if tx.transaction_date > snapshot_end:
+                        continue
+                    if is_liability:
+                        if tx.type == models.TransactionType.INCOME:
+                            tx_sum -= tx.amount
+                        elif tx.type == models.TransactionType.EXPENSE:
+                            tx_sum += tx.amount
+                        elif tx.type == models.TransactionType.TRANSFER:
+                            tx_sum += tx.amount if tx.is_source_transaction else -tx.amount
+                    else:
+                        if tx.type == models.TransactionType.INCOME:
+                            tx_sum += tx.amount
+                        elif tx.type == models.TransactionType.EXPENSE:
+                            tx_sum -= tx.amount
+                        elif tx.type == models.TransactionType.TRANSFER:
+                            tx_sum += -tx.amount if tx.is_source_transaction else tx.amount
+                historical_bal = (account.opening_balance or Decimal("0")) + tx_sum
 
                 if account.currency != base_currency:
                     balance_in_base = historical_bal * rate_cache.get(account.currency, Decimal("1"))

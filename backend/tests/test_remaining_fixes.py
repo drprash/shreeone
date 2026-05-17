@@ -160,35 +160,6 @@ def test_snapshot_task_uses_live_balance_for_asset_account_not_stale_current_bal
     )
 
 
-def test_snapshot_task_still_uses_current_value_for_valuation_accounts(db_session):
-    """VALUATION account types (property, funds) must still use current_value,
-    not calculate_account_balance — they have no transaction history."""
-    from app.main import record_net_worth_snapshot_task
-
-    fam = _make_family(db_session)
-    _make_user(db_session, fam)
-    prop = _make_account(
-        db_session, fam,
-        opening_balance=Decimal("0"),
-        current_balance=Decimal("0"),
-        acc_type=models.AccountType.PROPERTY,
-    )
-    # Set current_value (the authoritative source for valuation accounts)
-    prop.current_value = Decimal("350000")
-    db_session.commit()
-
-    record_net_worth_snapshot_task()
-
-    db_session.expire_all()
-    snapshot = db_session.query(models.NetWorthSnapshot).filter(
-        models.NetWorthSnapshot.family_id == fam.id
-    ).first()
-
-    assert snapshot is not None
-    assert snapshot.total_net_worth == Decimal("350000"), (
-        f"Expected 350000 (current_value), got {snapshot.total_net_worth}"
-    )
-
 
 # ─── I5: compute_net_worth_history excludes post-snapshot transactions ─────────
 

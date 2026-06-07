@@ -29,6 +29,8 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 
 ---
 
+![ShreeOne](/media/shreeone_home.png)
+
 ## Features
 
 - **Multi-account tracking** — bank accounts, credit cards, cash wallets, investment portfolios

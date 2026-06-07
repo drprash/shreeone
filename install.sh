@@ -28,7 +28,7 @@ confirm() {
     [[ "$default" == "Y" ]] && choices="[Y/n]" || choices="[y/N]"
     read -r -p "$(echo -e "${BOLD}${prompt}${RESET} ${choices} ")" answer
     answer="${answer:-$default}"
-    [[ "$answer" =~ ^[Yy]$ ]]
+    [[ "$answer" =~ ^[Yy](es)?$ ]]
 }
 
 # Generate a random hex string of given byte-length (defaults to 32 → 64 hex chars)
@@ -127,9 +127,13 @@ https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
                             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
                         sudo apt-get update -qq
                         sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-                        sudo systemctl enable --now docker
+                        if grep -qi microsoft /proc/version 2>/dev/null; then
+                            info "WSL2 detected — skipping systemctl (start Docker Desktop on Windows instead)."
+                        else
+                            sudo systemctl enable --now docker
+                        fi
                         sudo usermod -aG docker "$USER"
-                        success "Docker installed. You may need to log out and back in for group membership to take effect."
+                        success "Docker installed."
                         ;;
                     fedora|rhel|centos|rocky|almalinux)
                         info "Installing Docker via dnf/yum..."
@@ -138,14 +142,22 @@ https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
                             sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
                         sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || \
                             sudo yum -y install docker-ce docker-ce-cli containerd.io
-                        sudo systemctl enable --now docker
+                        if grep -qi microsoft /proc/version 2>/dev/null; then
+                            info "WSL2 detected — skipping systemctl (start Docker Desktop on Windows instead)."
+                        else
+                            sudo systemctl enable --now docker
+                        fi
                         sudo usermod -aG docker "$USER"
                         success "Docker installed."
                         ;;
                     arch|manjaro)
                         info "Installing Docker via pacman..."
                         sudo pacman -Sy --noconfirm docker docker-compose
-                        sudo systemctl enable --now docker
+                        if grep -qi microsoft /proc/version 2>/dev/null; then
+                            info "WSL2 detected — skipping systemctl (start Docker Desktop on Windows instead)."
+                        else
+                            sudo systemctl enable --now docker
+                        fi
                         sudo usermod -aG docker "$USER"
                         success "Docker installed."
                         ;;
@@ -167,6 +179,22 @@ https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
 }
 
 check_or_install_docker
+
+# After a fresh Docker install the current shell does not yet have the docker
+# group, so docker commands fail with "permission denied". Detect this early
+# and ask the user to re-login rather than letting a cryptic error appear later.
+if ! docker info &>/dev/null 2>&1; then
+    echo ""
+    warn "Docker is installed but this terminal session doesn't have access yet."
+    warn "This is normal after a fresh install — your user was added to the 'docker' group"
+    warn "but the change only takes effect after you log out and log back in."
+    echo ""
+    bold "  Next steps:"
+    echo "    1. Close this terminal (log out and back in, or restart your computer)."
+    echo "    2. Re-run this script:  bash install.sh"
+    echo ""
+    exit 0
+fi
 
 # Verify Docker Compose (v2 plugin or standalone)
 if docker compose version &>/dev/null 2>&1; then
@@ -313,6 +341,7 @@ bold "── Step 3: Build & Start Services ────────────
 cd "$SCRIPT_DIR"
 
 info "Running: ${COMPOSE_CMD} up -d --build"
+info "On the first run this can take 5–10 minutes (downloading images and compiling). Please wait..."
 echo ""
 $COMPOSE_CMD up -d --build
 echo ""
@@ -321,7 +350,7 @@ echo ""
 bold "── Step 4: Health Check ─────────────────────────────────────"
 
 HEALTH_URL="http://localhost:5173/api/health"
-MAX_WAIT=90
+MAX_WAIT=180
 INTERVAL=5
 elapsed=0
 
@@ -351,7 +380,7 @@ bold "============================================================"
 echo ""
 
 # Read FRONTEND_URL from .env for display (covers the case where we skipped config)
-DISPLAY_URL=$(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "http://localhost:5173")
+DISPLAY_URL=$(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "http://localhost:5173")
 
 echo -e "  ${GREEN}App URL:${RESET}        ${BOLD}${DISPLAY_URL}${RESET}"
 echo -e "  ${GREEN}API health:${RESET}     ${BOLD}${DISPLAY_URL}/api/health${RESET}"

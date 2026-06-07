@@ -88,25 +88,26 @@ class FinancialEngine:
 
         is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
-        # For liabilities, flip signs: expenses add to debt, income reduces debt
+        # Use amount_in_base_currency so cross-currency transactions (e.g. USD tx on
+        # an AED account) are correctly converted rather than treated as account-currency.
         if is_liability:
-            income_amount = -models.Transaction.amount
-            expense_amount = models.Transaction.amount
-            transfer_source_amount = models.Transaction.amount      # Cash advance increases debt
-            transfer_target_amount = -models.Transaction.amount     # Payment reduces debt
+            income_amount = -models.Transaction.amount_in_base_currency
+            expense_amount = models.Transaction.amount_in_base_currency
+            transfer_source_amount = models.Transaction.amount_in_base_currency
+            transfer_target_amount = -models.Transaction.amount_in_base_currency
         else:
-            income_amount = models.Transaction.amount
-            expense_amount = -models.Transaction.amount
-            transfer_source_amount = -models.Transaction.amount
-            transfer_target_amount = models.Transaction.amount
+            income_amount = models.Transaction.amount_in_base_currency
+            expense_amount = -models.Transaction.amount_in_base_currency
+            transfer_source_amount = -models.Transaction.amount_in_base_currency
+            transfer_target_amount = models.Transaction.amount_in_base_currency
 
-        # Sum all transactions
+        # Sum all transactions (result is in family base currency)
         result = db.query(
             func.sum(
                 case(
                     (models.Transaction.type == models.TransactionType.INCOME, income_amount),
                     (models.Transaction.type == models.TransactionType.EXPENSE, expense_amount),
-                    (models.Transaction.type == models.TransactionType.TRANSFER, 
+                    (models.Transaction.type == models.TransactionType.TRANSFER,
                         case(
                             (models.Transaction.is_source_transaction == True, transfer_source_amount),
                             (models.Transaction.is_source_transaction == False, transfer_target_amount),
@@ -120,9 +121,25 @@ class FinancialEngine:
             models.Transaction.account_id == account_id,
             models.Transaction.deleted_at.is_(None)
         ).scalar()
-        
-        balance = (account.opening_balance or Decimal('0')) + (result or Decimal('0'))
-        return balance
+
+        result_in_base = result or Decimal('0')
+        opening_balance = account.opening_balance or Decimal('0')
+
+        family = db.query(models.Family).filter(models.Family.id == account.family_id).first()
+        base_currency = family.base_currency if family else account.currency
+
+        if account.currency == base_currency:
+            return opening_balance + result_in_base
+
+        # opening_balance is in account currency; convert to base, sum, convert back
+        acc_to_base = FinancialEngine.get_exchange_rate(
+            db, account.currency, base_currency, family_id=account.family_id
+        )
+        base_to_acc = FinancialEngine.get_exchange_rate(
+            db, base_currency, account.currency, family_id=account.family_id
+        )
+        opening_in_base = opening_balance * acc_to_base
+        return (opening_in_base + result_in_base) * base_to_acc
 
     @staticmethod
     def update_account_balance(db: Session, account_id: str):

@@ -134,7 +134,11 @@ const AccountDetail = () => {
     );
 
     return sorted.map(t => {
-      const amount = parseFloat(t.amount);
+      // Use amount_in_base_currency for cross-currency transactions so the running
+      // balance stays in the account's currency (valid when account currency = base currency).
+      const amount = t.currency !== account.currency
+        ? parseFloat(t.amount_in_base_currency)
+        : parseFloat(t.amount);
       if (isLiability) {
         // Liability accounts: expenses increase debt, income/payments decrease debt.
         // For transfers, is_source_transaction=true means this account initiated the
@@ -184,15 +188,17 @@ const AccountDetail = () => {
   // Calculate stats
   const stats = React.useMemo(() => {
     if (!transactions) return { income: 0, expense: 0, transfers: 0 };
-    
+
     return transactions.reduce((acc, t) => {
-      const amount = parseFloat(t.amount);
+      const amount = t.currency !== account?.currency
+        ? parseFloat(t.amount_in_base_currency)
+        : parseFloat(t.amount);
       if (t.type === 'INCOME') acc.income += amount;
       else if (t.type === 'EXPENSE') acc.expense += amount;
       else if (t.type === 'TRANSFER') acc.transfers += amount;
       return acc;
     }, { income: 0, expense: 0, transfers: 0 });
-  }, [transactions]);
+  }, [transactions, account]);
 
   const txResolvedBase = txFamilyProfile?.base_currency;
   const lookupTxStoredRate = (currency) => {

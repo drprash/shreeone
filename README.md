@@ -1,6 +1,6 @@
 # ShreeOne — Family Finance
 
-A private, shared money system for families - with control over what you share and what you don’t.
+A private, shared money system for families - with control over what you share and what you don't.
 
 ---
 
@@ -21,7 +21,7 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 | Need | How ShreeOne solves it |
 |---|---|
 | Shared family view | All members see a unified dashboard across all accounts |
-| Role-based privacy | Three privacy levels — Private, Shared (couple), Family — per transaction |
+| Role-based privacy | Three privacy levels — Private, Shared (couple), Family — configured per family |
 | Recurring payments | Auto-processed daily; bills appear in the ledger without manual entry |
 | Offline use | Full PWA with a service worker; transactions queue locally and sync when connectivity returns |
 | Install on Android | "Add to Home Screen" from Chrome — launches like a native app |
@@ -31,14 +31,18 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 
 ## Features
 
-- **Multi-account tracking** — bank accounts, credit cards, wallets, savings
+- **Multi-account tracking** — bank accounts, credit cards, cash wallets, investment portfolios
+- **Multi-currency support** — per-transaction currency override with automatic exchange rates (ECB + FloatRates, updated daily); manual rate override available
 - **Income & expense categorisation** with custom categories per family
 - **Budget settings** — monthly limits per category with alerts
 - **Recurring payments** — subscriptions, EMIs, SIPs auto-posted at midnight daily
-- **Role-based access** — Admin, Member, Viewer with granular permission overrides
-- **Transaction privacy** — Private / Shared / Family visibility per entry
+- **Role-based access** — Admin and Member roles with granular per-member permission overrides
+- **Family privacy levels** — Private / Shared / Family visibility, configured per family
+- **Country-based net worth** — accounts tagged by country with a breakdown widget on the dashboard
+- **Member spending breakdown** — per-member expense summary on the dashboard
 - **Passkey / WebAuthn** — passwordless login alongside JWT
 - **Offline-first PWA** — IndexedDB queue, auto-sync on reconnect; installable on Android
+- **Backup & restore** — one-command export/import via the admin panel or `scripts/backup.sh`
 
 ## Tech Stack
 
@@ -161,12 +165,16 @@ gunzip -c backups/shreeone_backup_YYYYMMDD_HHMMSS.sql.gz \
 shreeone/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py        # FastAPI app, scheduler, CORS
-│   │   ├── models.py      # SQLAlchemy models (14 tables)
+│   │   ├── main.py                 # FastAPI app, scheduler, CORS
+│   │   ├── models.py               # SQLAlchemy models (16 tables)
+│   │   ├── schemas.py              # Pydantic request/response schemas
 │   │   ├── crud.py
-│   │   ├── auth.py        # JWT + WebAuthn
+│   │   ├── auth.py                 # JWT + WebAuthn
+│   │   ├── financial_logic.py      # Balance calculation, transaction processing
+│   │   ├── exchange_rate_service.py# ECB + FloatRates exchange rate fetching
+│   │   ├── recurring_processor.py  # Recurring payment auto-posting
 │   │   ├── config.py
-│   │   └── routers/       # auth, accounts, transactions, categories, dashboard, settings, sync, admin
+│   │   └── routers/                # auth, accounts, transactions, categories, dashboard, settings, sync, admin, backup
 │   ├── tests/
 │   ├── requirements.txt
 │   └── Dockerfile
@@ -174,16 +182,16 @@ shreeone/
 │   ├── src/
 │   │   ├── pages/
 │   │   ├── components/
-│   │   ├── services/      # Axios API client, WebAuthn
-│   │   ├── store/         # Zustand (auth, theme)
-│   │   └── lib/           # IndexedDB offline queue
+│   │   ├── services/               # Axios API client, WebAuthn
+│   │   ├── store/                  # Zustand (auth, theme)
+│   │   └── lib/                    # IndexedDB offline queue
 │   ├── public/
 │   ├── nginx.conf
 │   ├── package.json
 │   └── Dockerfile
 ├── scripts/backup.sh
 ├── docker-compose.yml
-├── install.sh             # automated one-step installer
+├── install.sh                      # automated one-step installer
 └── .env.example
 ```
 

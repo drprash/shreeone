@@ -246,7 +246,10 @@ async def restore_backup(
     Restore family data from a backup JSON file.
 
     - Only the admin of the target family can restore.
-    - The backup family_id must match the admin's family_id.
+    - Same-family restore: backup family_id must match the admin's family_id.
+    - Cross-family restore: supported — all family_id references are remapped to
+      the target family. Use this to migrate data to a fresh installation.
+      The current admin is re-inserted after restore so they retain access.
     - Signature is verified before any data is touched.
     - All active sessions are invalidated at the start of restore.
     - The entire operation is wrapped in a single DB transaction; any failure
@@ -263,12 +266,6 @@ async def restore_backup(
     manifest = payload.get("backup_manifest")
     if not manifest:
         raise HTTPException(status_code=400, detail="Missing backup_manifest in file")
-
-    if manifest.get("family_id") != str(current_user.family_id):
-        raise HTTPException(
-            status_code=403,
-            detail="This backup belongs to a different family and cannot be restored here",
-        )
 
     if manifest.get("schema_version") != "1.0":
         raise HTTPException(
@@ -287,7 +284,30 @@ async def restore_backup(
     manifest["signature"] = signature  # restore for later reference
 
     included_modules = manifest.get("included_modules", [])
+    source_fid = manifest.get("family_id")
+    target_fid = str(current_user.family_id)
     fid = current_user.family_id
+    cross_family = source_fid != target_fid
+
+    # Remap all family_id references when restoring to a different family
+    if cross_family:
+        def _remap(obj: dict) -> dict:
+            return {
+                k: (target_fid if k == "family_id" and v == source_fid else v)
+                for k, v in obj.items()
+            }
+
+        payload["family"] = _remap(payload["family"])
+        payload["users"] = [_remap(u) for u in payload.get("users", [])]
+        payload["accounts"] = [_remap(a) for a in payload.get("accounts", [])]
+        payload["categories"] = [_remap(c) for c in payload.get("categories", [])]
+        payload["member_permissions"] = [_remap(p) for p in payload.get("member_permissions", [])]
+        if payload.get("family_preference"):
+            payload["family_preference"] = _remap(payload["family_preference"])
+        payload["family_currencies"] = [_remap(fc) for fc in payload.get("family_currencies", [])]
+        for opt_key in ("recurring_payments", "budget_settings", "exchange_rates", "audit_logs"):
+            if opt_key in payload:
+                payload[opt_key] = [_remap(item) for item in payload[opt_key]]
 
     # Invalidate all active sessions for the family before touching data
     family_users_before = db.query(models.User).filter(models.User.family_id == fid).all()
@@ -393,6 +413,29 @@ async def restore_backup(
                 "created_at": u["created_at"],
             })
 
+        # Cross-family restore: re-insert current admin if they're not in the backup,
+        # so they retain access after the restore completes.
+        if cross_family:
+            backup_user_ids = {u["id"] for u in payload.get("users", [])}
+            backup_emails = {u["email"] for u in payload.get("users", [])}
+            if str(current_user.id) not in backup_user_ids and current_user.email not in backup_emails:
+                db.execute(text("""
+                    INSERT INTO users (id, family_id, first_name, last_name, email, role,
+                                       token_version, active, activated, password_required, created_at)
+                    VALUES (:id, :family_id, :first_name, :last_name, :email, :role,
+                            0, TRUE, :activated, TRUE, :created_at)
+                    ON CONFLICT (id) DO NOTHING
+                """), {
+                    "id": str(current_user.id),
+                    "family_id": target_fid,
+                    "first_name": current_user.first_name,
+                    "last_name": current_user.last_name,
+                    "email": current_user.email,
+                    "role": current_user.role.value,
+                    "activated": current_user.activated,
+                    "created_at": current_user.created_at.isoformat(),
+                })
+
         # Accounts
         for a in payload["accounts"]:
             db.execute(text("""
@@ -482,15 +525,18 @@ async def restore_backup(
             fp = payload["family_preference"]
             db.execute(text("""
                 INSERT INTO family_preferences (id, family_id, theme, language,
-                    allow_member_invites, allow_transaction_sharing, show_budget_alerts,
-                    two_factor_enabled, created_at, updated_at)
+                    show_budget_alerts, two_factor_enabled,
+                    show_net_worth_by_country, show_member_spending,
+                    created_at, updated_at)
                 VALUES (:id, :family_id, :theme, :language,
-                    :allow_member_invites, :allow_transaction_sharing, :show_budget_alerts,
-                    :two_factor_enabled, :created_at, :updated_at)
+                    :show_budget_alerts, :two_factor_enabled,
+                    :show_net_worth_by_country, :show_member_spending,
+                    :created_at, :updated_at)
             """), {k: fp.get(k) for k in [
                 "id", "family_id", "theme", "language",
-                "allow_member_invites", "allow_transaction_sharing", "show_budget_alerts",
-                "two_factor_enabled", "created_at", "updated_at",
+                "show_budget_alerts", "two_factor_enabled",
+                "show_net_worth_by_country", "show_member_spending",
+                "created_at", "updated_at",
             ]})
 
         # Family currencies
@@ -591,6 +637,11 @@ async def restore_backup(
         "Passkey (WebAuthn) credentials are not restored — affected users must re-register "
         "their passkeys after setting a new password.",
     ]
+    if cross_family:
+        warnings.append(
+            f"Cross-family restore: all data was remapped from family {source_fid} to "
+            f"this family ({target_fid}). The restoring admin account has been preserved."
+        )
     if orphaned_count:
         warnings.append(
             f"{orphaned_count} user(s) existed in the live database but not in the backup — "

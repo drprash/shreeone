@@ -81,6 +81,8 @@ class FinancialEngine:
         For asset accounts:
         - INCOME increases the balance
         - EXPENSE decreases the balance
+
+        Returns balance in the account's own currency.
         """
         account = db.query(models.Account).filter(models.Account.id == account_id).first()
         if not account:
@@ -88,17 +90,42 @@ class FinancialEngine:
 
         is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
+        # Get the family's base currency so we can convert foreign-currency transactions
+        # to the account's own currency via amount_in_base_currency.
+        family = db.query(models.Family).filter(models.Family.id == account.family_id).first()
+        base_currency = family.base_currency if family else account.currency
+
+        # Build a SQL expression that yields each transaction's amount in the account's currency:
+        # - tx.currency == account.currency → use tx.amount directly (no conversion needed)
+        # - tx.currency != account.currency and base == account.currency →
+        #     amount_in_base_currency is already in account currency
+        # - tx.currency != account.currency and base != account.currency →
+        #     amount_in_base_currency is in base; divide by rate(account→base) to get account currency
+        if account.currency == base_currency:
+            native_amount = case(
+                (models.Transaction.currency == account.currency, models.Transaction.amount),
+                else_=models.Transaction.amount_in_base_currency,
+            )
+        else:
+            account_to_base_rate = FinancialEngine.get_exchange_rate(
+                db, account.currency, base_currency, family_id=str(account.family_id)
+            )
+            native_amount = case(
+                (models.Transaction.currency == account.currency, models.Transaction.amount),
+                else_=models.Transaction.amount_in_base_currency / float(account_to_base_rate),
+            )
+
         # For liabilities, flip signs: expenses add to debt, income reduces debt
         if is_liability:
-            income_amount = -models.Transaction.amount
-            expense_amount = models.Transaction.amount
-            transfer_source_amount = models.Transaction.amount      # Cash advance increases debt
-            transfer_target_amount = -models.Transaction.amount     # Payment reduces debt
+            income_amount = -native_amount
+            expense_amount = native_amount
+            transfer_source_amount = native_amount      # Cash advance increases debt
+            transfer_target_amount = -native_amount     # Payment reduces debt
         else:
-            income_amount = models.Transaction.amount
-            expense_amount = -models.Transaction.amount
-            transfer_source_amount = -models.Transaction.amount
-            transfer_target_amount = models.Transaction.amount
+            income_amount = native_amount
+            expense_amount = -native_amount
+            transfer_source_amount = -native_amount
+            transfer_target_amount = native_amount
 
         # Sum all transactions
         result = db.query(
@@ -106,7 +133,7 @@ class FinancialEngine:
                 case(
                     (models.Transaction.type == models.TransactionType.INCOME, income_amount),
                     (models.Transaction.type == models.TransactionType.EXPENSE, expense_amount),
-                    (models.Transaction.type == models.TransactionType.TRANSFER, 
+                    (models.Transaction.type == models.TransactionType.TRANSFER,
                         case(
                             (models.Transaction.is_source_transaction == True, transfer_source_amount),
                             (models.Transaction.is_source_transaction == False, transfer_target_amount),
@@ -120,7 +147,7 @@ class FinancialEngine:
             models.Transaction.account_id == account_id,
             models.Transaction.deleted_at.is_(None)
         ).scalar()
-        
+
         balance = (account.opening_balance or Decimal('0')) + (result or Decimal('0'))
         return balance
 
@@ -723,30 +750,34 @@ class FinancialEngine:
             for account in accounts:
                 is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
-                tx_sum = Decimal("0")
+                # Use amount_in_base_currency — it was stored at transaction creation time
+                # using the historical exchange rate, so it correctly handles transactions
+                # entered in a currency different from the account's own currency.
+                tx_sum_in_base = Decimal("0")
                 for tx in txs_by_account.get(account.id, []):
                     if tx.transaction_date > snapshot_end:
                         continue
+                    tx_base = tx.amount_in_base_currency or Decimal("0")
                     if is_liability:
                         if tx.type == models.TransactionType.INCOME:
-                            tx_sum -= tx.amount
+                            tx_sum_in_base -= tx_base
                         elif tx.type == models.TransactionType.EXPENSE:
-                            tx_sum += tx.amount
+                            tx_sum_in_base += tx_base
                         elif tx.type == models.TransactionType.TRANSFER:
-                            tx_sum += tx.amount if tx.is_source_transaction else -tx.amount
+                            tx_sum_in_base += tx_base if tx.is_source_transaction else -tx_base
                     else:
                         if tx.type == models.TransactionType.INCOME:
-                            tx_sum += tx.amount
+                            tx_sum_in_base += tx_base
                         elif tx.type == models.TransactionType.EXPENSE:
-                            tx_sum -= tx.amount
+                            tx_sum_in_base -= tx_base
                         elif tx.type == models.TransactionType.TRANSFER:
-                            tx_sum += -tx.amount if tx.is_source_transaction else tx.amount
-                historical_bal = (account.opening_balance or Decimal("0")) + tx_sum
+                            tx_sum_in_base += -tx_base if tx.is_source_transaction else tx_base
 
-                if account.currency != base_currency:
-                    balance_in_base = historical_bal * rate_cache.get(account.currency, Decimal("1"))
-                else:
-                    balance_in_base = historical_bal
+                # Convert opening_balance (in account currency) to base using the
+                # snapshot's historical rate (rate_cache falls back to today's rate).
+                account_rate = rate_cache.get(account.currency, Decimal("1"))
+                opening_in_base = (account.opening_balance or Decimal("0")) * account_rate
+                balance_in_base = opening_in_base + tx_sum_in_base
 
                 if is_liability:
                     net_worth -= balance_in_base

@@ -301,7 +301,9 @@ const BackupRestore = () => {
           <strong>Destructive operation.</strong> Restoring a backup will permanently overwrite all
           current family data. This action cannot be undone. All family members will be logged out.
           Password hashes and passkey credentials are not restored — all users will need to
-          reset their passwords.
+          reset their passwords. You may also restore a backup from a <em>different</em> family
+          (e.g. after deleting and recreating a family account) — all data will be imported into
+          this family.
         </Alert>
 
         {/* File input */}

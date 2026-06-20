@@ -28,15 +28,28 @@ def _compute_progress(db: Session, goal: models.Goal) -> schemas.GoalProgress:
     Compute current progress for a goal.
 
     - If linked_account_id is set: use the live account balance (auto-tracked).
+      If the account's currency differs from the goal's currency, the balance is
+      converted so the comparison is always in goal.currency.
     - Otherwise: use goal.current_amount which is updated by manual contributions.
+
+    Also computes base-currency equivalents for cross-goal aggregation.
     """
+    from app.financial_logic import FinancialEngine
+
     if goal.linked_account_id:
-        from app.financial_logic import FinancialEngine
         from app.models import LIABILITY_ACCOUNT_TYPES
         balance = FinancialEngine.calculate_account_balance(db, str(goal.linked_account_id))
         linked_account = db.query(models.Account).filter(
             models.Account.id == goal.linked_account_id
         ).first()
+
+        # Convert balance to goal currency if account currency differs
+        if linked_account and linked_account.currency != goal.currency:
+            rate = FinancialEngine.get_exchange_rate(
+                db, linked_account.currency, goal.currency, family_id=goal.family_id
+            )
+            balance = balance * rate
+
         if linked_account and linked_account.type in LIABILITY_ACCOUNT_TYPES:
             # For liability accounts, balance = debt owed (positive).
             # Progress = how much has been paid off = target - remaining debt.
@@ -62,6 +75,22 @@ def _compute_progress(db: Session, goal: models.Goal) -> schemas.GoalProgress:
         if months_remaining > 0 and remaining > 0:
             monthly_needed = remaining / months_remaining
 
+    # Compute base-currency equivalents for cross-goal aggregation
+    family = db.query(models.Family).filter(models.Family.id == goal.family_id).first()
+    base_currency = family.base_currency if family else None
+    current_amount_in_base = None
+    target_amount_in_base = None
+    if base_currency:
+        if goal.currency == base_currency:
+            current_amount_in_base = current_amount
+            target_amount_in_base = target
+        else:
+            rate_to_base = FinancialEngine.get_exchange_rate(
+                db, goal.currency, base_currency, family_id=goal.family_id
+            )
+            current_amount_in_base = current_amount * rate_to_base
+            target_amount_in_base = target * rate_to_base
+
     return schemas.GoalProgress(
         goal_id=goal.id,
         name=goal.name,
@@ -74,6 +103,9 @@ def _compute_progress(db: Session, goal: models.Goal) -> schemas.GoalProgress:
         months_remaining=months_remaining,
         days_remaining=days_remaining,
         monthly_needed=monthly_needed,
+        base_currency=base_currency,
+        current_amount_in_base=current_amount_in_base,
+        target_amount_in_base=target_amount_in_base,
     )
 
 

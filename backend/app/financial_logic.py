@@ -9,15 +9,52 @@ class FinancialEngine:
     # Default exchange rates relative to USD (1 unit of currency = X USD)
     # Source: Real-world approximate rates as of 2026
     DEFAULT_RATES = {
-        'USD': Decimal('1.0'),      # Base currency
-        'EUR': Decimal('1.1'),      # 1 EUR ≈ 1.1 USD
-        'GBP': Decimal('1.28'),     # 1 GBP ≈ 1.28 USD
-        'INR': Decimal('0.012'),    # 1 INR ≈ 0.012 USD (1 USD ≈ 83 INR)
-        'CAD': Decimal('0.74'),     # 1 CAD ≈ 0.74 USD
-        'AUD': Decimal('0.67'),     # 1 AUD ≈ 0.67 USD
-        'JPY': Decimal('0.0067'),   # 1 JPY ≈ 0.0067 USD (1 USD ≈ 150 JPY)
-        'AED': Decimal('0.272'),    # 1 AED ≈ 0.272 USD (1 USD ≈ 3.67 AED)
-        'THB': Decimal('0.028'),    # 1 THB ≈ 0.028 USD (1 USD ≈ 36 THB)
+        # Major reserve currencies
+        'USD': Decimal('1.0'),        # Base reference
+        'EUR': Decimal('1.10'),       # 1 EUR ≈ 1.10 USD
+        'GBP': Decimal('1.28'),       # 1 GBP ≈ 1.28 USD
+        'CHF': Decimal('1.10'),       # 1 CHF ≈ 1.10 USD
+        # Asia-Pacific
+        'JPY': Decimal('0.0067'),     # 1 JPY ≈ 0.0067 USD  (1 USD ≈ 150 JPY)
+        'CNY': Decimal('0.138'),      # 1 CNY ≈ 0.138 USD   (1 USD ≈ 7.25 CNY)
+        'HKD': Decimal('0.128'),      # 1 HKD ≈ 0.128 USD   (1 USD ≈ 7.80 HKD)
+        'KRW': Decimal('0.00073'),    # 1 KRW ≈ 0.00073 USD (1 USD ≈ 1,370 KRW)
+        'TWD': Decimal('0.031'),      # 1 TWD ≈ 0.031 USD   (1 USD ≈ 32.5 TWD)
+        'SGD': Decimal('0.74'),       # 1 SGD ≈ 0.74 USD    (1 USD ≈ 1.35 SGD)
+        'AUD': Decimal('0.67'),       # 1 AUD ≈ 0.67 USD
+        'NZD': Decimal('0.60'),       # 1 NZD ≈ 0.60 USD
+        # South & Southeast Asia
+        'INR': Decimal('0.012'),      # 1 INR ≈ 0.012 USD   (1 USD ≈ 83 INR)
+        'BDT': Decimal('0.0091'),     # 1 BDT ≈ 0.0091 USD  (1 USD ≈ 110 BDT)
+        'PKR': Decimal('0.0036'),     # 1 PKR ≈ 0.0036 USD  (1 USD ≈ 278 PKR)
+        'LKR': Decimal('0.0034'),     # 1 LKR ≈ 0.0034 USD  (1 USD ≈ 295 LKR)
+        'NPR': Decimal('0.0075'),     # 1 NPR ≈ 0.0075 USD  (1 USD ≈ 133 NPR)
+        'MYR': Decimal('0.22'),       # 1 MYR ≈ 0.22 USD    (1 USD ≈ 4.50 MYR)
+        'THB': Decimal('0.028'),      # 1 THB ≈ 0.028 USD   (1 USD ≈ 36 THB)
+        'PHP': Decimal('0.017'),      # 1 PHP ≈ 0.017 USD   (1 USD ≈ 58 PHP)
+        'IDR': Decimal('0.000062'),   # 1 IDR ≈ 0.000062 USD (1 USD ≈ 16,000 IDR)
+        # Gulf / Middle East
+        'AED': Decimal('0.272'),      # 1 AED ≈ 0.272 USD   (1 USD ≈ 3.67 AED, pegged)
+        'SAR': Decimal('0.267'),      # 1 SAR ≈ 0.267 USD   (1 USD ≈ 3.75 SAR, pegged)
+        'QAR': Decimal('0.275'),      # 1 QAR ≈ 0.275 USD   (1 USD ≈ 3.64 QAR, pegged)
+        'KWD': Decimal('3.25'),       # 1 KWD ≈ 3.25 USD    (1 USD ≈ 0.308 KWD)
+        'BHD': Decimal('2.65'),       # 1 BHD ≈ 2.65 USD    (1 USD ≈ 0.376 BHD, pegged)
+        'OMR': Decimal('2.60'),       # 1 OMR ≈ 2.60 USD    (1 USD ≈ 0.385 OMR, pegged)
+        # Canada
+        'CAD': Decimal('0.74'),       # 1 CAD ≈ 0.74 USD
+        # Europe (non-EUR)
+        'SEK': Decimal('0.096'),      # 1 SEK ≈ 0.096 USD   (1 USD ≈ 10.4 SEK)
+        'NOK': Decimal('0.094'),      # 1 NOK ≈ 0.094 USD   (1 USD ≈ 10.6 NOK)
+        'DKK': Decimal('0.147'),      # 1 DKK ≈ 0.147 USD   (1 USD ≈ 6.80 DKK)
+        'PLN': Decimal('0.25'),       # 1 PLN ≈ 0.25 USD    (1 USD ≈ 4.00 PLN)
+        'CZK': Decimal('0.044'),      # 1 CZK ≈ 0.044 USD   (1 USD ≈ 22.7 CZK)
+        # Americas
+        'BRL': Decimal('0.18'),       # 1 BRL ≈ 0.18 USD    (1 USD ≈ 5.50 BRL)
+        'MXN': Decimal('0.058'),      # 1 MXN ≈ 0.058 USD   (1 USD ≈ 17.2 MXN)
+        # Africa
+        'ZAR': Decimal('0.054'),      # 1 ZAR ≈ 0.054 USD   (1 USD ≈ 18.5 ZAR)
+        'KES': Decimal('0.0077'),     # 1 KES ≈ 0.0077 USD  (1 USD ≈ 130 KES)
+        'NGN': Decimal('0.00063'),    # 1 NGN ≈ 0.00063 USD (1 USD ≈ 1,580 NGN)
     }
 
     @staticmethod
@@ -292,6 +329,187 @@ class FinancialEngine:
             FinancialEngine.update_account_balance(db, transaction_data.target_account_id)
         
         return transaction, linked_transaction
+
+    @staticmethod
+    def get_period_stats(
+        db: Session,
+        family_id: str,
+        user: "models.User",
+        start_date: "date",
+        end_date: "date",
+    ) -> dict:
+        """
+        Return income, expenses, savings, savings_rate, categories, member_spending,
+        and daily_totals for [start_date, end_date] inclusive.
+        All amounts use amount_in_base_currency (family base currency).
+        Privacy filtering mirrors get_family_dashboard_data().
+        """
+        from datetime import datetime, timedelta, date as date_type
+
+        family = db.query(models.Family).filter_by(id=family_id).first()
+        privacy_level = family.privacy_level if family else models.PrivacyLevel.FAMILY
+
+        period_start = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0)
+        period_end = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, 999999)
+
+        base_account_query = db.query(models.Account).filter(
+            models.Account.family_id == family_id,
+            models.Account.deleted_at.is_(None),
+        )
+        if user.role != models.Role.ADMIN:
+            if privacy_level == models.PrivacyLevel.PRIVATE:
+                base_account_query = base_account_query.filter(
+                    models.Account.owner_user_id == user.id
+                )
+            elif privacy_level == models.PrivacyLevel.SHARED:
+                base_account_query = base_account_query.filter(
+                    or_(
+                        models.Account.owner_type == models.OwnerType.SHARED,
+                        models.Account.owner_user_id == user.id,
+                    )
+                )
+        accounts = base_account_query.all()
+        account_ids = [a.id for a in accounts]
+
+        income = Decimal('0')
+        expenses = Decimal('0')
+        category_breakdown: list = []
+        member_spending: list = []
+        daily_totals: list = []
+
+        if account_ids:
+            base_tx_query = db.query(models.Transaction).join(
+                models.Account, models.Transaction.account_id == models.Account.id
+            ).filter(
+                models.Transaction.account_id.in_(account_ids),
+                models.Transaction.transaction_date >= period_start,
+                models.Transaction.transaction_date <= period_end,
+                models.Transaction.deleted_at.is_(None),
+            )
+
+            if user.role != models.Role.ADMIN:
+                if privacy_level == models.PrivacyLevel.PRIVATE:
+                    base_tx_query = base_tx_query.filter(
+                        models.Transaction.created_by_user_id == user.id
+                    )
+                elif privacy_level == models.PrivacyLevel.SHARED:
+                    base_tx_query = base_tx_query.filter(
+                        or_(
+                            models.Transaction.created_by_user_id == user.id,
+                            models.Account.owner_type == models.OwnerType.SHARED,
+                        )
+                    )
+
+            # Income / expense totals
+            totals = base_tx_query.with_entities(
+                models.Transaction.type,
+                func.coalesce(func.sum(models.Transaction.amount_in_base_currency), 0)
+            ).group_by(models.Transaction.type).all()
+
+            for tx_type, total in totals:
+                if tx_type == models.TransactionType.INCOME:
+                    income = Decimal(str(total or 0))
+                elif tx_type == models.TransactionType.EXPENSE:
+                    expenses = Decimal(str(total or 0))
+
+            # Category breakdown (expenses with a category only)
+            cat_totals = base_tx_query.with_entities(
+                models.Transaction.category_id,
+                func.coalesce(func.sum(models.Transaction.amount_in_base_currency), 0)
+            ).filter(
+                models.Transaction.type == models.TransactionType.EXPENSE,
+                models.Transaction.category_id.is_not(None),
+            ).group_by(models.Transaction.category_id).all()
+
+            if cat_totals:
+                cat_ids = [cid for cid, _ in cat_totals if cid]
+                cats = db.query(models.Category).filter(models.Category.id.in_(cat_ids)).all()
+                cat_map = {c.id: c for c in cats}
+                total_for_pct = sum(Decimal(str(a or 0)) for _, a in cat_totals) or Decimal('1')
+
+                for cat_id, amount in cat_totals:
+                    cat = cat_map.get(cat_id)
+                    if not cat:
+                        continue
+                    d_amount = Decimal(str(amount or 0))
+                    category_breakdown.append(schemas.CategoryBreakdown(
+                        category_id=cat.id,
+                        category_name=cat.name,
+                        total_amount=d_amount,
+                        percentage=float(d_amount / total_for_pct * 100),
+                        color=cat.color or '#94a3b8',
+                    ))
+
+            # Member spending (expenses only)
+            member_totals = base_tx_query.with_entities(
+                models.Transaction.created_by_user_id,
+                func.coalesce(func.sum(models.Transaction.amount_in_base_currency), 0),
+                func.count(models.Transaction.id),
+            ).filter(
+                models.Transaction.type == models.TransactionType.EXPENSE,
+            ).group_by(models.Transaction.created_by_user_id).all()
+
+            if member_totals:
+                m_ids = [mid for mid, _, _ in member_totals if mid]
+                members = db.query(models.User).filter(models.User.id.in_(m_ids)).all()
+                member_map = {m.id: m for m in members}
+
+                for member_id, total_amount, tx_count in member_totals:
+                    member = member_map.get(member_id)
+                    if not member:
+                        continue
+                    member_spending.append(schemas.MemberSpending(
+                        user_id=member.id,
+                        user_name=member.first_name,
+                        total_expense=Decimal(str(total_amount or 0)),
+                        transaction_count=int(tx_count or 0),
+                    ))
+
+            # Daily totals — one entry per calendar day in [start_date, end_date]
+            day_map: dict = {}
+            current_day = start_date
+            while current_day <= end_date:
+                day_map[current_day] = {'income': Decimal('0'), 'expenses': Decimal('0')}
+                current_day += timedelta(days=1)
+
+            daily_rows = base_tx_query.with_entities(
+                func.date(models.Transaction.transaction_date),
+                models.Transaction.type,
+                func.coalesce(func.sum(models.Transaction.amount_in_base_currency), 0),
+            ).filter(
+                models.Transaction.type.in_([
+                    models.TransactionType.INCOME,
+                    models.TransactionType.EXPENSE,
+                ])
+            ).group_by(
+                func.date(models.Transaction.transaction_date),
+                models.Transaction.type,
+            ).all()
+
+            for tx_date, tx_type, total in daily_rows:
+                if tx_date in day_map:
+                    if tx_type == models.TransactionType.INCOME:
+                        day_map[tx_date]['income'] = Decimal(str(total or 0))
+                    elif tx_type == models.TransactionType.EXPENSE:
+                        day_map[tx_date]['expenses'] = Decimal(str(total or 0))
+
+            daily_totals = [
+                schemas.StatsDailyTotal(date=d, income=v['income'], expenses=v['expenses'])
+                for d, v in sorted(day_map.items())
+            ]
+
+        savings = income - expenses
+        savings_rate = round(float(savings / income * 100), 1) if income > 0 else 0.0
+
+        return {
+            'income': income,
+            'expenses': expenses,
+            'savings': savings,
+            'savings_rate': savings_rate,
+            'categories': category_breakdown,
+            'member_spending': member_spending,
+            'daily_totals': daily_totals,
+        }
 
     @staticmethod
     def get_family_dashboard_data(db: Session, family_id: str, user: models.User) -> schemas.DashboardData:

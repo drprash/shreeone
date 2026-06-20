@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import settingsAPI from '../../services/settingsAPI';
-import { getAIStatus, testAIConnection } from '../../services/aiAPI';
+import { getAIStatus, testAIConnection, generateNarratives } from '../../services/aiAPI';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
 import { queryKeys } from '../../utils/queryKeys';
@@ -61,6 +61,8 @@ const FamilySettings = () => {
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResults, setTestResults] = useState(null);
   const [connectionError, setConnectionError] = useState(null);
+  const [generatingNarratives, setGeneratingNarratives] = useState(false);
+  const [narrativeGenResult, setNarrativeGenResult] = useState(null);
 
   // Form states
   const [profileForm, setProfileForm] = useState({
@@ -587,6 +589,39 @@ const FamilySettings = () => {
                         <p className="text-xs text-slate-500 dark:text-slate-400">Generate a brief weekly summary on the Dashboard</p>
                       </div>
                     </label>
+
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                        Summaries are auto-generated on a schedule. Use this to generate them immediately.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={generatingNarratives}
+                        onClick={async () => {
+                          setGeneratingNarratives(true);
+                          setNarrativeGenResult(null);
+                          try {
+                            const result = await generateNarratives('all');
+                            setNarrativeGenResult(
+                              result.length > 0
+                                ? `Generated ${result.length} narrative(s): ${result.map(n => n.period_label).join(', ')}`
+                                : 'No new narratives to generate — summaries for the current periods already exist or there are no transactions yet.'
+                            );
+                            queryClient.invalidateQueries({ queryKey: ['ai-narratives'] });
+                          } catch {
+                            setNarrativeGenResult('Generation failed. Check that the AI service is available.');
+                          } finally {
+                            setGeneratingNarratives(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 text-sm bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
+                      >
+                        {generatingNarratives ? 'Generating…' : 'Generate Now'}
+                      </button>
+                      {narrativeGenResult && (
+                        <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{narrativeGenResult}</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

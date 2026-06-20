@@ -1,4 +1,5 @@
 import { Wallet, CreditCard, PiggyBank, TrendingUp, TrendingDown, DollarSign, Landmark, LineChart } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { formatCurrency } from '../../utils/formatters';
 
 const SummaryCards = ({ data }) => {
@@ -68,7 +69,8 @@ const SummaryCards = ({ data }) => {
       color: 'bg-emerald-500',
       trend: data.monthly_income_trend,
       trendMetric: 'INCOME',
-      isPercentage: true
+      isPercentage: true,
+      statsLink: true,
     },
     {
       title: 'Monthly Expense',
@@ -104,7 +106,14 @@ const SummaryCards = ({ data }) => {
         <div key={index} className="card-hover bg-white dark:bg-slate-800 rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:border-slate-700">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 mb-1">{card.title}</p>
+              <p className="text-sm text-gray-600 mb-1">
+                {card.title}
+                {card.statsLink && (
+                  <Link to="/stats" className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-normal">
+                    Stats →
+                  </Link>
+                )}
+              </p>
               <p className={`text-xl sm:text-2xl font-bold ${card.useDynamicValueColor ? resolveValueColorClass(card.value) : (card.isNegative ? 'text-red-600' : 'text-gray-900')}`}>
                 {formatCurrency(card.value, base_currency)}
               </p>

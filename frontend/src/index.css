@@ -12,10 +12,26 @@ body {
   background-color: #f3f4f6;
 }
 
+.dark body {
+  background-color: #0d1117;
+}
+
 @layer base {
   html.dark {
-    @apply bg-slate-950;
+    background-color: #0d1117;
     color-scheme: dark;
+  }
+
+  /* Safety-net: elements without explicit dark: variants get proper dark colors.
+     Explicit dark: utility classes always win (utilities beat base layer). */
+  html.dark .bg-white {
+    background-color: #1e293b;
+  }
+
+  html.dark .bg-gray-100,
+  html.dark .bg-slate-50,
+  html.dark .bg-gray-50 {
+    background-color: #161b22;
   }
 
   html.dark input[type="text"],
@@ -61,45 +77,33 @@ body {
     @apply text-slate-300;
   }
 
-  html.dark .bg-white {
-    @apply dark:bg-slate-800;
-  }
-
-  html.dark .bg-gray-100,
-  html.dark .bg-slate-50 {
-    @apply dark:bg-slate-800;
-  }
-
-  html.dark .bg-gray-50 {
-    @apply dark:bg-slate-700;
-  }
-
   html.dark .text-gray-900 {
-    @apply dark:text-slate-100;
+    @apply text-slate-100;
   }
 
   html.dark .text-gray-600,
   html.dark .text-slate-600 {
-    @apply dark:text-slate-400;
+    @apply text-slate-400;
   }
 
   html.dark .text-gray-500,
   html.dark .text-slate-500 {
-    @apply dark:text-slate-400;
+    @apply text-slate-400;
+  }
+
+  html.dark .border-gray-100,
+  html.dark .border-slate-100 {
+    border-color: #2a3142;
   }
 
   html.dark .border-gray-200,
   html.dark .border-slate-200 {
-    @apply dark:border-slate-700;
+    @apply border-slate-700;
   }
 
   html.dark .border-gray-300,
   html.dark .border-slate-300 {
-    @apply dark:border-slate-600;
-  }
-
-  html.dark .shadow {
-    @apply dark:shadow-slate-900;
+    @apply border-slate-600;
   }
 }
 
@@ -133,6 +137,10 @@ body {
     transform: translateY(-4px);
     @apply shadow-lg;
     box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
+  }
+
+  .dark .card-hover:hover {
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
   }
 
   /* Expense Item Hover */

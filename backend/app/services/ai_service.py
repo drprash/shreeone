@@ -198,19 +198,28 @@ def generate_monthly_narrative(
     Generate a 3–4 sentence plain-English narrative of a family's monthly finances.
 
     summary keys: month, family_name, base_currency, total_income, total_expenses,
-                  net_savings, savings_rate, top_categories, vs_previous_month, vs_budget
+                  net_savings, savings_rate, top_categories
     """
-    prompt = f"""You are a personal finance advisor writing a brief monthly summary for a family.
-Write a warm, 3-4 sentence narrative based on the data below. Use the family name.
-Be specific — mention actual numbers and categories. Do not use bullet points.
-
-Data:
-{json.dumps(summary, indent=2)}
-
-Monthly summary:"""
-
-    raw = _get_backend(family_id, db).complete(prompt, max_tokens=256)
-    return raw if raw else None
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a personal finance advisor. Write a warm, 3-4 sentence monthly "
+                "narrative for a family. Use the family's name. Mention specific numbers "
+                "and top spending categories. Output only the narrative text — no labels, "
+                "no bullet points, no preamble."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Write the monthly finance narrative for this data:\n\n"
+                f"{json.dumps(summary, indent=2)}"
+            ),
+        },
+    ]
+    raw = _get_backend(family_id, db).chat(messages, max_tokens=256)
+    return raw.strip() if raw else None
 
 def _extract_text_from_pdf(pdf_bytes: bytes, backend) -> Optional[str]:
     """
@@ -375,20 +384,111 @@ def parse_statement(
     except json.JSONDecodeError:
         return None
 
+def build_period_summary(db, family, start_date, end_date) -> Optional[dict]:
+    """
+    Query transactions for a family within [start_date, end_date] and return a summary dict.
+    Returns None if no transactions found (caller should skip generation).
+    Keys: total_income, total_expenses, net_savings, savings_rate, top_categories.
+    Amounts are in the family's base currency (amount_in_base_currency column).
+    """
+    from app import models as _models
+    from sqlalchemy import func
+    from decimal import Decimal
+
+    account_ids = [
+        a.id for a in db.query(_models.Account.id).filter(
+            _models.Account.family_id == family.id,
+            _models.Account.deleted_at.is_(None),
+        ).all()
+    ]
+    if not account_ids:
+        return None
+
+    base_q = db.query(_models.Transaction).filter(
+        _models.Transaction.account_id.in_(account_ids),
+        _models.Transaction.deleted_at.is_(None),
+        _models.Transaction.transaction_date >= start_date,
+        _models.Transaction.transaction_date <= end_date,
+    )
+
+    total_income = Decimal("0")
+    total_expenses = Decimal("0")
+    for tx in base_q.all():
+        base_amt = tx.amount_in_base_currency or Decimal("0")
+        if tx.type == _models.TransactionType.INCOME:
+            total_income += base_amt
+        elif tx.type == _models.TransactionType.EXPENSE:
+            total_expenses += base_amt
+
+    if total_income == 0 and total_expenses == 0:
+        return None
+
+    net_savings = total_income - total_expenses
+    savings_rate = round(float(net_savings / total_income * 100), 1) if total_income else 0.0
+
+    cat_rows = (
+        base_q.filter(
+            _models.Transaction.type == _models.TransactionType.EXPENSE,
+            _models.Transaction.category_id.is_not(None),
+        )
+        .with_entities(
+            _models.Transaction.category_id,
+            func.sum(_models.Transaction.amount_in_base_currency).label("total"),
+        )
+        .group_by(_models.Transaction.category_id)
+        .order_by(func.sum(_models.Transaction.amount_in_base_currency).desc())
+        .limit(5)
+        .all()
+    )
+
+    cat_ids = [r.category_id for r in cat_rows]
+    cat_map = {}
+    if cat_ids:
+        cats = db.query(_models.Category).filter(_models.Category.id.in_(cat_ids)).all()
+        cat_map = {c.id: c.name for c in cats}
+
+    base_currency = family.base_currency or "USD"
+
+    def fmt(amount: float) -> str:
+        return f"{amount:,.2f} {base_currency}"
+
+    top_categories = [
+        {"name": cat_map.get(r.category_id, "Other"), "amount": fmt(round(float(r.total), 2))}
+        for r in cat_rows
+    ]
+
+    return {
+        "base_currency": base_currency,
+        "total_income": fmt(round(float(total_income), 2)),
+        "total_expenses": fmt(round(float(total_expenses), 2)),
+        "net_savings": fmt(round(float(net_savings), 2)),
+        "savings_rate": f"{savings_rate}%",
+        "top_categories": top_categories,
+    }
+
+
 def generate_weekly_digest(summary: dict, family_id=None, db=None) -> Optional[str]:
     """
     Generate a 2-sentence weekly spending digest.
 
-    summary keys: week_ending, family_name, base_currency, total_spent,
-                  vs_weekly_pace, top_categories
+    summary keys: week_ending, family_name, base_currency, total_spent, top_categories
     """
-    prompt = f"""You are a personal finance advisor writing a brief weekly spending summary for a family.
-Write exactly 2 sentences. Be specific — mention actual numbers and categories.
-
-Data:
-{json.dumps(summary, indent=2)}
-
-Weekly digest:"""
-
-    raw = _get_backend(family_id, db).complete(prompt, max_tokens=128)
-    return raw if raw else None
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a personal finance advisor. Write a 2-sentence weekly spending digest "
+                "for a family. Use the family's name. Mention specific amounts and top categories. "
+                "Output only the 2 sentences — no labels, no bullet points, no preamble."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Write the weekly spending digest for this data:\n\n"
+                f"{json.dumps(summary, indent=2)}"
+            ),
+        },
+    ]
+    raw = _get_backend(family_id, db).chat(messages, max_tokens=128)
+    return raw.strip() if raw else None

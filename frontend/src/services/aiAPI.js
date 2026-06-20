@@ -37,5 +37,8 @@ export const bulkCreateTransactions = (transactions) =>
 export const getNarratives = () =>
   api.get('/ai/narratives').then(r => r.data);
 
+export const generateNarratives = (type = 'all') =>
+  api.post(`/ai/narratives/generate?narrative_type=${type}`).then(r => r.data);
+
 export const dismissNarrative = (id) =>
   api.post(`/ai/narratives/${id}/dismiss`);

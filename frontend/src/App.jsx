@@ -24,6 +24,7 @@ const Register = React.lazy(() => import('./pages/Register'));
 const SetPassword = React.lazy(() => import('./pages/SetPassword'));
 const ForgotPassword = React.lazy(() => import('./pages/ForgotPassword'));
 const Goals = React.lazy(() => import('./pages/Goals'));
+const Stats = React.lazy(() => import('./pages/Stats'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -175,6 +176,11 @@ function App() {
                 <Route path="/goals" element={
                   <PrivateRoute>
                     <Goals />
+                  </PrivateRoute>
+                } />
+                <Route path="/stats" element={
+                  <PrivateRoute>
+                    <Stats />
                   </PrivateRoute>
                 } />
               </Route>

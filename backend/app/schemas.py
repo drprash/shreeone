@@ -274,6 +274,43 @@ class MemberSpending(BaseModel):
     total_expense: Decimal
     transaction_count: int
 
+class StatsDailyTotal(BaseModel):
+    date: date
+    income: Decimal
+    expenses: Decimal
+
+class StatsPeriod(BaseModel):
+    start_date: date
+    end_date: date
+
+class StatsCurrentData(BaseModel):
+    income: Decimal
+    expenses: Decimal
+    savings: Decimal
+    savings_rate: float
+    categories: List[CategoryBreakdown]
+    member_spending: List[MemberSpending]
+    daily_totals: List[StatsDailyTotal]
+
+class StatsPriorData(BaseModel):
+    income: Decimal
+    expenses: Decimal
+    savings: Decimal
+    savings_rate: float
+
+class StatsTrends(BaseModel):
+    income_change_pct: Optional[float] = None
+    expense_change_pct: Optional[float] = None
+    savings_change_pct: Optional[float] = None
+
+class StatsResponse(BaseModel):
+    base_currency: str
+    period: StatsPeriod
+    prior_period: StatsPeriod
+    current: StatsCurrentData
+    prior: StatsPriorData
+    trends: StatsTrends
+
 class DashboardData(BaseModel):
     summary: DashboardSummary
     category_breakdown: List[CategoryBreakdown]
@@ -711,6 +748,10 @@ class GoalProgress(BaseModel):
     months_remaining: Optional[int] = None
     monthly_needed: Optional[Decimal] = None
     days_remaining: Optional[int] = None
+    # Base-currency equivalents for cross-goal aggregation
+    base_currency: Optional[str] = None
+    current_amount_in_base: Optional[Decimal] = None
+    target_amount_in_base: Optional[Decimal] = None
 
 
 class GoalContributeRequest(BaseModel):

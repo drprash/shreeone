@@ -11,8 +11,10 @@ const NarrativeBanner = () => {
   const { data: narratives = [] } = useQuery({
     queryKey: ['ai-narratives'],
     queryFn: getNarratives,
-    enabled: aiStatus.ai_services_enabled && aiStatus.ai_monthly_narrative_enabled !== false,
+    enabled: !!aiStatus.ai_services_enabled &&
+      (aiStatus.ai_monthly_narrative_enabled !== false || aiStatus.ai_weekly_digest_enabled !== false),
     staleTime: 1000 * 60 * 5,
+    refetchInterval: 1000 * 60 * 15,
   });
 
   const { mutate: dismiss } = useMutation({

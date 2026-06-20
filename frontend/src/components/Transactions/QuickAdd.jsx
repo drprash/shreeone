@@ -114,7 +114,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
     ? (parseFloat(watchedAmount) * parseFloat(watchedRate)).toFixed(2)
     : null;
 
-  // Debounced category suggestion: fires 800ms after the user stops typing
+  // Debounced category suggestion: fires 1000ms after the user stops typing
   const categorizationTimer = useRef(null);
   const handleDescriptionChange = useCallback((description) => {
     setAiSuggestion(null);
@@ -125,7 +125,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
         const result = await categorizeTransaction(description);
         if (result?.category_id) setAiSuggestion(result);
       } catch { /* silent — AI is optional */ }
-    }, 800);
+    }, 1000);
   }, [aiAvailable, aiStatus.ai_categorization_enabled]);
 
   useEffect(() => () => clearTimeout(categorizationTimer.current), []);

@@ -129,7 +129,7 @@ const Transactions = () => {
         const result = await categorizeTransaction(description);
         if (result?.category_id) setAiSuggestion(result);
       } catch { /* silent */ }
-    }, 800);
+    }, 1000);
   }, [aiAvailable, aiStatus.ai_categorization_enabled]);
 
   useEffect(() => () => clearTimeout(categorizationTimer.current), []);

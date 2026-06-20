@@ -423,6 +423,110 @@ async def parse_statement(
         raw_count=len(rows),
     )
 
+@router.post("/narratives/generate", response_model=list[schemas.AINarrativeResponse])
+def generate_narratives_now(
+    narrative_type: str = "all",
+    current_user: models.User = Depends(auth.get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger on-demand generation of AI narratives for the current family.
+    narrative_type: "weekly", "monthly", or "all" (default).
+    Skips generation if an undismissed narrative for the same period already exists.
+    """
+    prefs = _get_ai_prefs(db, current_user.family_id)
+    _require_ai_enabled(prefs)
+
+    if not ai_service.is_available(family_id=current_user.family_id, db=db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is not available.",
+        )
+
+    from datetime import date, timedelta, datetime as _dt
+    import calendar as _cal
+
+    family = db.query(models.Family).filter(models.Family.id == current_user.family_id).first()
+    generated = []
+
+    def _already_exists(ntype: str, label: str) -> bool:
+        return db.query(models.AINarrative).filter(
+            models.AINarrative.family_id == current_user.family_id,
+            models.AINarrative.narrative_type == ntype,
+            models.AINarrative.period_label == label,
+            models.AINarrative.dismissed_at.is_(None),
+        ).first() is not None
+
+    # Weekly digest
+    if narrative_type in ("weekly", "all") and getattr(prefs, "ai_weekly_digest_enabled", True):
+        now = _dt.utcnow()
+        end_date = now.date() - timedelta(days=1)
+        start_date = end_date - timedelta(days=6)
+        week_ending = end_date.strftime("%b %d")
+        period_label = f"Week of {week_ending}"
+
+        if not _already_exists("WEEKLY", period_label):
+            period_data = ai_service.build_period_summary(db, family, start_date, end_date)
+            if period_data:
+                summary = {
+                    "week_ending": week_ending,
+                    "family_name": family.name,
+                    "base_currency": family.base_currency,
+                    "total_spent": period_data["total_expenses"],
+                    "top_categories": period_data["top_categories"],
+                }
+                content = ai_service.generate_weekly_digest(
+                    summary, family_id=current_user.family_id, db=db
+                )
+                if content:
+                    n = models.AINarrative(
+                        family_id=current_user.family_id,
+                        narrative_type="WEEKLY",
+                        period_label=period_label,
+                        content=content,
+                    )
+                    db.add(n)
+                    generated.append(n)
+
+    # Monthly summary
+    if narrative_type in ("monthly", "all") and getattr(prefs, "ai_monthly_narrative_enabled", True):
+        now = _dt.utcnow()
+        prev_month = now.month - 1 or 12
+        prev_year = now.year if now.month > 1 else now.year - 1
+        period_label = f"{_cal.month_name[prev_month]} {prev_year}"
+        start_date = date(prev_year, prev_month, 1)
+        end_date = date(prev_year, prev_month, _cal.monthrange(prev_year, prev_month)[1])
+
+        if not _already_exists("MONTHLY", period_label):
+            period_data = ai_service.build_period_summary(db, family, start_date, end_date)
+            if period_data:
+                summary = {
+                    "month": period_label,
+                    "family_name": family.name,
+                    "base_currency": family.base_currency,
+                    **period_data,
+                }
+                content = ai_service.generate_monthly_narrative(
+                    summary, family_id=current_user.family_id, db=db
+                )
+                if content:
+                    n = models.AINarrative(
+                        family_id=current_user.family_id,
+                        narrative_type="MONTHLY",
+                        period_label=period_label,
+                        content=content,
+                    )
+                    db.add(n)
+                    generated.append(n)
+
+    if generated:
+        db.commit()
+        for n in generated:
+            db.refresh(n)
+
+    return generated
+
+
 @router.get("/narratives", response_model=list[schemas.AINarrativeResponse])
 def get_narratives(
     narrative_type: Optional[str] = None,

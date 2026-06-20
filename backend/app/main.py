@@ -7,6 +7,7 @@ from app.routers import auth, accounts, transactions, categories, dashboard, adm
 from app.routers import settings as settings_router
 from app.routers import ai as ai_router
 from app.routers import goals as goals_router
+from app.routers import stats as stats_router
 from app.recurring_processor import RecurringPaymentProcessor
 from app.exchange_rate_service import fetch_all_family_rates
 from app.services import ai_service
@@ -151,84 +152,7 @@ def prune_tokens_task():
         db.close()
 
 def _build_period_summary(db, family, start_date, end_date):
-    """
-    Query transactions for a family within [start_date, end_date] and return a summary dict.
-    Returns keys: total_income, total_expenses, net_savings, savings_rate, top_categories.
-    Amounts are in the family's base currency (amount_in_base_currency column).
-    Returns None if no transactions found.
-    """
-    from app import models as app_models
-    from sqlalchemy import func
-    from decimal import Decimal
-
-    # Collect account IDs for this family
-    account_ids = [
-        a.id for a in db.query(app_models.Account.id).filter(
-            app_models.Account.family_id == family.id,
-            app_models.Account.deleted_at.is_(None),
-        ).all()
-    ]
-    if not account_ids:
-        return None
-
-    base_q = db.query(app_models.Transaction).filter(
-        app_models.Transaction.account_id.in_(account_ids),
-        app_models.Transaction.deleted_at.is_(None),
-        app_models.Transaction.transaction_date >= start_date,
-        app_models.Transaction.transaction_date <= end_date,
-    )
-
-    total_income = Decimal("0")
-    total_expenses = Decimal("0")
-    for tx in base_q.all():
-        base_amt = tx.amount_in_base_currency or Decimal("0")
-        if tx.type == app_models.TransactionType.INCOME:
-            total_income += base_amt
-        elif tx.type == app_models.TransactionType.EXPENSE:
-            total_expenses += base_amt
-
-    if total_income == 0 and total_expenses == 0:
-        return None
-
-    net_savings = total_income - total_expenses
-    savings_rate = round(float(net_savings / total_income * 100), 1) if total_income else 0.0
-
-    # Top categories by expense amount
-    cat_rows = (
-        base_q.filter(
-            app_models.Transaction.type == app_models.TransactionType.EXPENSE,
-            app_models.Transaction.category_id.is_not(None),
-        )
-        .with_entities(
-            app_models.Transaction.category_id,
-            func.sum(app_models.Transaction.amount_in_base_currency).label("total"),
-        )
-        .group_by(app_models.Transaction.category_id)
-        .order_by(func.sum(app_models.Transaction.amount_in_base_currency).desc())
-        .limit(5)
-        .all()
-    )
-
-    cat_ids = [r.category_id for r in cat_rows]
-    cat_map = {}
-    if cat_ids:
-        cats = db.query(app_models.Category).filter(
-            app_models.Category.id.in_(cat_ids)
-        ).all()
-        cat_map = {c.id: c.name for c in cats}
-
-    top_categories = [
-        {"name": cat_map.get(r.category_id, "Other"), "amount": round(float(r.total), 2)}
-        for r in cat_rows
-    ]
-
-    return {
-        "total_income": round(float(total_income), 2),
-        "total_expenses": round(float(total_expenses), 2),
-        "net_savings": round(float(net_savings), 2),
-        "savings_rate": savings_rate,
-        "top_categories": top_categories,
-    }
+    return ai_service.build_period_summary(db, family, start_date, end_date)
 
 
 def record_net_worth_snapshot_task():
@@ -543,6 +467,7 @@ app.include_router(sync.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
 app.include_router(ai_router.router, prefix="/api")
 app.include_router(goals_router.router, prefix="/api")
+app.include_router(stats_router.router, prefix="/api")
 
 # ============ Startup and Shutdown Events ============
 @app.on_event("startup")

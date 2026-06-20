@@ -46,6 +46,36 @@ def _verify(payload: dict, sig: str) -> bool:
     return hmac.compare_digest(_sign(payload), sig)
 
 
+def _remap_family_id(payload: dict, old_fid: str, new_fid: str) -> dict:
+    """Remap every family_id occurrence in the backup payload from old_fid to new_fid.
+
+    Used when restoring into a newly-created family whose UUID differs from the backup's.
+    User/account/transaction UUIDs are preserved as-is; only the family_id FK column
+    is rewritten so inserts land in the correct family.
+    """
+    list_tables = [
+        "users", "accounts", "categories", "member_permissions",
+        "family_currencies", "goals", "recurring_payments", "budget_settings",
+        "exchange_rates", "audit_logs",
+    ]
+    result = dict(payload)
+
+    if result.get("family_preference"):
+        fp = dict(result["family_preference"])
+        if fp.get("family_id") == old_fid:
+            fp["family_id"] = new_fid
+        result["family_preference"] = fp
+
+    for table in list_tables:
+        if result.get(table):
+            result[table] = [
+                {**row, "family_id": new_fid} if row.get("family_id") == old_fid else dict(row)
+                for row in result[table]
+            ]
+
+    return result
+
+
 
 @router.get("/preview")
 def backup_preview(
@@ -251,7 +281,10 @@ async def restore_backup(
     Restore family data from a backup JSON file.
 
     - Only the admin of the target family can restore.
-    - The backup family_id must match the admin's family_id.
+    - Same-family restore: backup family_id matches the admin's family_id.
+    - Cross-family restore: backup family_id differs (e.g. restoring into a freshly
+      created family after the original was deleted). All family_id references in the
+      backup are remapped to the current family's UUID before insert.
     - Signature is verified before any data is touched.
     - All active sessions are invalidated at the start of restore.
     - The entire operation is wrapped in a single DB transaction; any failure
@@ -269,12 +302,6 @@ async def restore_backup(
     if not manifest:
         raise HTTPException(status_code=400, detail="Missing backup_manifest in file")
 
-    if manifest.get("family_id") != str(current_user.family_id):
-        raise HTTPException(
-            status_code=403,
-            detail="This backup belongs to a different family and cannot be restored here",
-        )
-
     if manifest.get("schema_version") != "1.0":
         raise HTTPException(
             status_code=422,
@@ -291,8 +318,14 @@ async def restore_backup(
         )
     manifest["signature"] = signature  # restore for later reference
 
-    included_modules = manifest.get("included_modules", [])
+    backup_fid = manifest.get("family_id")
     fid = current_user.family_id
+    is_cross_family = backup_fid != str(fid)
+
+    if is_cross_family:
+        payload = _remap_family_id(payload, backup_fid, str(fid))
+
+    included_modules = manifest.get("included_modules", [])
 
     # Invalidate all active sessions for the family before touching data
     family_users_before = db.query(models.User).filter(models.User.family_id == fid).all()
@@ -505,7 +538,7 @@ async def restore_backup(
                     ai_categorization_enabled, ai_monthly_narrative_enabled,
                     ai_weekly_digest_enabled, ai_receipt_ocr_enabled,
                     ai_voice_entry_enabled, ai_statement_upload_enabled,
-                    ai_provider, ai_model_override,
+                    ai_provider, ai_model_override, ai_services_enabled,
                     created_at, updated_at)
                 VALUES (:id, :family_id, :theme, :language,
                     :show_budget_alerts, :two_factor_enabled,
@@ -513,7 +546,7 @@ async def restore_backup(
                     :ai_categorization_enabled, :ai_monthly_narrative_enabled,
                     :ai_weekly_digest_enabled, :ai_receipt_ocr_enabled,
                     :ai_voice_entry_enabled, :ai_statement_upload_enabled,
-                    :ai_provider, :ai_model_override,
+                    :ai_provider, :ai_model_override, :ai_services_enabled,
                     :created_at, :updated_at)
             """), {k: fp.get(k) for k in [
                 "id", "family_id", "theme", "language",
@@ -522,7 +555,7 @@ async def restore_backup(
                 "ai_categorization_enabled", "ai_monthly_narrative_enabled",
                 "ai_weekly_digest_enabled", "ai_receipt_ocr_enabled",
                 "ai_voice_entry_enabled", "ai_statement_upload_enabled",
-                "ai_provider", "ai_model_override",
+                "ai_provider", "ai_model_override", "ai_services_enabled",
                 "created_at", "updated_at",
             ]})
 
@@ -625,18 +658,32 @@ async def restore_backup(
             detail=f"Restore failed and was fully rolled back: {str(e)}",
         )
 
-    # Audit log written after successful commit using admin's preserved user ID
-    crud.create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        action="RESTORE_COMPLETED",
-        entity_type="Family",
-        entity_id=fid,
-        new_values=(
-            f"Restore completed from backup generated at {manifest.get('generated_at')}; "
-            f"modules={included_modules}"
-        ),
-    )
+    # Audit log written after successful commit.
+    # In a cross-family restore the current_user row no longer exists (it was wiped and replaced
+    # by backup users), so find the first restored admin to avoid an FK violation.
+    audit_user_id = current_user.id
+    if is_cross_family:
+        restored_admin = db.query(models.User).filter(
+            models.User.family_id == fid,
+            models.User.role == models.Role.ADMIN,
+        ).first()
+        if restored_admin:
+            audit_user_id = restored_admin.id
+
+    try:
+        crud.create_audit_log(
+            db=db,
+            user_id=audit_user_id,
+            action="RESTORE_COMPLETED",
+            entity_type="Family",
+            entity_id=fid,
+            new_values=(
+                f"Restore completed from backup generated at {manifest.get('generated_at')}; "
+                f"modules={included_modules}; cross_family={is_cross_family}"
+            ),
+        )
+    except Exception:
+        pass  # Non-fatal — data already committed
 
     warnings = [
         "All active sessions have been invalidated — all family members must log in again.",
@@ -645,7 +692,12 @@ async def restore_backup(
         "Passkey (WebAuthn) credentials are not restored — affected users must re-register "
         "their passkeys after setting a new password.",
     ]
-    if orphaned_count:
+    if is_cross_family:
+        warnings.insert(0,
+            f"Cross-family restore: backup was from family {backup_fid}. All data has been "
+            "imported into this family. Log in using a restored user account."
+        )
+    if orphaned_count and not is_cross_family:
         warnings.append(
             f"{orphaned_count} user(s) existed in the live database but not in the backup — "
             "they have been removed. Reinvite them via /api/admin/members if needed."

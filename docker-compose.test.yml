@@ -1,0 +1,36 @@
+services:
+  test-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shreeone_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shreeone_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  backend-test:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    environment:
+      PYTHONPATH: /app
+      database_url: postgresql+psycopg2://postgres:postgres@test-db:5432/shreeone_test
+      secret_key: test-secret
+    command: >
+      sh -lc "pip install --no-cache-dir -r requirements.txt pytest &&
+      pytest tests/ -q -p no:cacheprovider"
+    depends_on:
+      test-db:
+        condition: service_healthy
+
+  frontend-test:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: sh -lc "npm ci && npm run build"

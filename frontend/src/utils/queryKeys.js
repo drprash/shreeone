@@ -31,4 +31,7 @@ export const queryKeys = {
 
   // Settings
   familySettings:          ()                                 => ['family-settings'],
+
+  // Stats
+  stats:                   (startDate, endDate)               => ['stats', startDate, endDate],
 };

@@ -3,7 +3,7 @@ from typing import Optional, List, Literal
 from datetime import datetime, date
 from decimal import Decimal
 from uuid import UUID
-from app.models import Role, AccountType, OwnerType, TransactionType, CategoryType, BudgetPeriod, RecurrencePattern, NotificationChannel, LIABILITY_ACCOUNT_TYPES, ExchangeRateSource
+from app.models import Role, AccountType, OwnerType, TransactionType, CategoryType, BudgetPeriod, RecurrencePattern, NotificationChannel, LIABILITY_ACCOUNT_TYPES, ExchangeRateSource, GoalType
 
 # Family schemas
 class FamilyBase(BaseModel):
@@ -153,12 +153,12 @@ class AccountCreate(AccountBase):
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
+    currency: Optional[str] = Field(None, min_length=3, max_length=3)
     include_in_family_overview: Optional[bool] = None
     sort_order: Optional[int] = None
     country_code: Optional[str] = Field(default=None, pattern="^[A-Z]{2}$")
-
 class BalanceAdjustRequest(BaseModel):
-    new_balance: Decimal
+    new_balance: Decimal = Field(..., ge=0)
 
 class AccountResponse(AccountBase):
     id: UUID
@@ -169,6 +169,7 @@ class AccountResponse(AccountBase):
     sort_order: int = 0
     country_code: Optional[str] = None
     created_at: datetime
+    transaction_count: int = 0
 
     @computed_field
     @property
@@ -272,6 +273,43 @@ class MemberSpending(BaseModel):
     user_name: str
     total_expense: Decimal
     transaction_count: int
+
+class StatsDailyTotal(BaseModel):
+    date: date
+    income: Decimal
+    expenses: Decimal
+
+class StatsPeriod(BaseModel):
+    start_date: date
+    end_date: date
+
+class StatsCurrentData(BaseModel):
+    income: Decimal
+    expenses: Decimal
+    savings: Decimal
+    savings_rate: float
+    categories: List[CategoryBreakdown]
+    member_spending: List[MemberSpending]
+    daily_totals: List[StatsDailyTotal]
+
+class StatsPriorData(BaseModel):
+    income: Decimal
+    expenses: Decimal
+    savings: Decimal
+    savings_rate: float
+
+class StatsTrends(BaseModel):
+    income_change_pct: Optional[float] = None
+    expense_change_pct: Optional[float] = None
+    savings_change_pct: Optional[float] = None
+
+class StatsResponse(BaseModel):
+    base_currency: str
+    period: StatsPeriod
+    prior_period: StatsPeriod
+    current: StatsCurrentData
+    prior: StatsPriorData
+    trends: StatsTrends
 
 class DashboardData(BaseModel):
     summary: DashboardSummary
@@ -421,13 +459,34 @@ class FamilyPreferenceUpdate(BaseModel):
     two_factor_enabled: Optional[bool] = None
     show_net_worth_by_country: Optional[bool] = None
     show_member_spending: Optional[bool] = None
+    ai_categorization_enabled: Optional[bool] = None
+    ai_monthly_narrative_enabled: Optional[bool] = None
+    ai_weekly_digest_enabled: Optional[bool] = None
+    ai_receipt_ocr_enabled: Optional[bool] = None
+    ai_voice_entry_enabled: Optional[bool] = None
+    ai_statement_upload_enabled: Optional[bool] = None
+    ai_provider: Optional[str] = None     # "local" | "openai" | "anthropic" | "google"
+    ai_model_override: Optional[str] = None
+    ai_services_enabled: Optional[bool] = None
 
 class FamilyPreferenceResponse(FamilyPreferenceBase):
     id: UUID
     family_id: UUID
+    # AI master switch
+    ai_services_enabled: bool = False
+    # AI feature flags
+    ai_categorization_enabled: bool = True
+    ai_monthly_narrative_enabled: bool = True
+    ai_weekly_digest_enabled: bool = True
+    ai_receipt_ocr_enabled: bool = True
+    ai_voice_entry_enabled: bool = True
+    ai_statement_upload_enabled: bool = True
+    # AI provider selection
+    ai_provider: Optional[str] = None
+    ai_model_override: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -467,7 +526,7 @@ class MemberInviteResponse(BaseModel):
 class TransferAdminRequest(BaseModel):
     new_admin_user_id: UUID
 
-# ── Family Currency schemas ────────────────────────────────────────────────────
+# Family currency
 
 class FamilyCurrencyCreate(BaseModel):
     currency_code: str = Field(..., pattern="^[A-Z]{3}$")
@@ -483,7 +542,7 @@ class FamilyCurrencyResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# ── Exchange Rate schemas ──────────────────────────────────────────────────────
+# Exchange rates
 
 class ExchangeRateResponse(BaseModel):
     id: UUID
@@ -504,7 +563,7 @@ class ExchangeRateManualUpdate(BaseModel):
     rate: Decimal = Field(..., gt=0)
     valid_date: date
 
-# ── Dashboard country breakdown ────────────────────────────────────────────────
+# Dashboard
 
 class CountryBreakdown(BaseModel):
     country_code: Optional[str]      # None = "Other / Unassigned"
@@ -515,3 +574,202 @@ class CountryBreakdown(BaseModel):
 class DashboardDataWithCountry(DashboardData):
     country_breakdown: List[CountryBreakdown] = []
     rates_as_of: Optional[date] = None
+
+
+# AI
+
+class AIStatusResponse(BaseModel):
+    ai_service_available: bool
+    ai_services_enabled: bool = True
+    ai_categorization_enabled: bool
+    ai_monthly_narrative_enabled: bool
+    ai_weekly_digest_enabled: bool
+    ai_receipt_ocr_enabled: bool
+    ai_voice_entry_enabled: bool
+    ai_statement_upload_enabled: bool
+    ai_provider: str = "local"           # effective provider: local | openai | anthropic | google
+    ai_model: str = ""                   # effective model name in use
+    configured_providers: list[str] = [] # providers with API keys configured on this server
+
+
+class AIProviderTestResult(BaseModel):
+    provider: str
+    success: bool
+    error: Optional[str] = None
+
+
+class AITestConnectionResponse(BaseModel):
+    results: List[AIProviderTestResult] = []
+
+
+class CategorizationRequest(BaseModel):
+    description: str = Field(..., min_length=1, max_length=500)
+
+
+class CategorizationResponse(BaseModel):
+    category: str
+    category_id: Optional[UUID] = None
+    confidence: str  # "high" | "medium" | "low"
+
+
+class ReceiptParseResponse(BaseModel):
+    is_receipt: bool
+    merchant: Optional[str] = None
+    amount: Optional[Decimal] = None
+    currency: Optional[str] = None
+    date: Optional[str] = None          # YYYY-MM-DD string
+    category_hint: Optional[str] = None
+
+
+class VoiceParseResponse(BaseModel):
+    is_transaction: bool
+    amount: Optional[Decimal] = None
+    currency: Optional[str] = None
+    description: Optional[str] = None
+    category_hint: Optional[str] = None
+
+
+class VoiceTranscriptRequest(BaseModel):
+    transcript: str = Field(..., min_length=1, max_length=1000)
+
+
+class StatementTransaction(BaseModel):
+    """One row extracted from a bank/credit-card statement."""
+    date: Optional[str] = None          # YYYY-MM-DD
+    description: Optional[str] = None
+    amount: Optional[Decimal] = None
+    currency: Optional[str] = None      # populated after AI categorisation
+    category_hint: Optional[str] = None
+    duplicate: bool = False             # True if a matching transaction already exists
+
+
+class StatementParseResponse(BaseModel):
+    transactions: list[StatementTransaction]
+    raw_count: int    # how many rows the AI found before duplicate check
+    currency_hint: Optional[str] = None  # inferred from statement if detectable
+
+
+class BulkTransactionItem(BaseModel):
+    """Single item in a bulk create request (EXPENSE only)."""
+    type: str = "EXPENSE"
+    amount: Decimal = Field(..., gt=0)
+    currency: str = Field(..., min_length=3, max_length=3)
+    description: str = Field("", max_length=500)
+    transaction_date: str                # ISO datetime string
+    account_id: UUID
+    category_id: Optional[UUID] = None
+    exchange_rate_to_base: Optional[Decimal] = None
+
+
+class BulkTransactionCreate(BaseModel):
+    transactions: list[BulkTransactionItem] = Field(..., min_length=1, max_length=200)
+
+
+class BulkTransactionResponse(BaseModel):
+    created: int
+    failed: int
+    transaction_ids: list[UUID]
+    failures: list[str] = []
+
+
+class AINarrativeResponse(BaseModel):
+    id: UUID
+    family_id: UUID
+    narrative_type: str
+    period_label: str
+    content: str
+    generated_at: datetime
+    dismissed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class NetWorthSnapshotResponse(BaseModel):
+    id: UUID
+    family_id: UUID
+    snapshot_date: date
+    total_net_worth: Decimal
+    breakdown_json: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class GoalCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    type: GoalType
+    target_amount: Decimal = Field(..., gt=0)
+    currency: str = Field(..., min_length=3, max_length=3)
+    target_date: Optional[date] = None
+    linked_account_id: Optional[UUID] = None
+    notes: Optional[str] = None
+
+
+class GoalUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    target_amount: Optional[Decimal] = Field(None, gt=0)
+    currency: Optional[str] = Field(None, min_length=3, max_length=3)
+    target_date: Optional[date] = None
+    linked_account_id: Optional[UUID] = None
+    notes: Optional[str] = None
+    archived_at: Optional[datetime] = None
+
+
+class GoalResponse(BaseModel):
+    id: UUID
+    family_id: UUID
+    name: str
+    type: GoalType
+    target_amount: Decimal
+    current_amount: Decimal = Decimal("0")
+    currency: str
+    target_date: Optional[date] = None
+    linked_account_id: Optional[UUID] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    archived_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class GoalProgress(BaseModel):
+    goal_id: UUID
+    name: str
+    type: GoalType
+    target_amount: Decimal
+    current_amount: Decimal
+    currency: str
+    percent: float
+    target_date: Optional[date] = None
+    months_remaining: Optional[int] = None
+    monthly_needed: Optional[Decimal] = None
+    days_remaining: Optional[int] = None
+    # Base-currency equivalents for cross-goal aggregation
+    base_currency: Optional[str] = None
+    current_amount_in_base: Optional[Decimal] = None
+    target_amount_in_base: Optional[Decimal] = None
+
+
+class GoalContributeRequest(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+    note: Optional[str] = Field(None, max_length=500)
+    contributed_at: Optional[date] = None
+
+
+class GoalContributionResponse(BaseModel):
+    id: UUID
+    goal_id: UUID
+    amount: Decimal
+    note: Optional[str] = None
+    contributed_at: date
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+

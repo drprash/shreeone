@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, ArrowRightLeft, DollarSign, PiggyBank, CreditCard, Wallet } from 'lucide-react';
+import { TrendingUp, TrendingDown, ArrowRightLeft, DollarSign, PiggyBank, CreditCard, Wallet, Landmark } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Transaction type helpers
@@ -42,6 +42,8 @@ export const getAccountIcon = (type, size = 'w-6 h-6') => {
       return <PiggyBank className={size} />;
     case 'CREDIT_CARD':
       return <CreditCard className={size} />;
+    case 'LOAN':
+      return <Landmark className={size} />;
     case 'INVESTMENT':
       return <Wallet className={size} />;
     default:
@@ -88,6 +90,8 @@ export const getAccountColor = (type) => {
       return 'bg-blue-100 text-blue-600';
     case 'CREDIT_CARD':
       return 'bg-red-100 text-red-600';
+    case 'LOAN':
+      return 'bg-orange-100 text-orange-600';
     case 'INVESTMENT':
       return 'bg-purple-100 text-purple-600';
     default:

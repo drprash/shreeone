@@ -36,6 +36,7 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 - **Multi-account tracking** — bank accounts, credit cards, cash wallets, investment portfolios
 - **Multi-currency support** — per-transaction currency override with automatic exchange rates (ECB + FloatRates, updated daily); manual rate override available
 - **Income & expense categorisation** with custom categories per family
+- **Financial Goals** — savings targets, big purchases, debt payoff, net-worth milestones; manual contributions with history or auto-tracked via a linked account
 - **Budget settings** — monthly limits per category with alerts
 - **Recurring payments** — subscriptions, EMIs, SIPs auto-posted at midnight daily
 - **Role-based access** — Admin and Member roles with granular per-member permission overrides
@@ -55,6 +56,8 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 | Auth | JWT (30 min access / 7 day refresh) + WebAuthn passkeys |
 | Database | PostgreSQL 16 |
 | Scheduler | APScheduler (recurring payments at 00:00, token pruning at 01:00, exchange rates at 06:00) |
+| AI | Ollama + Gemma 4 E4B (local, `--profile ollama`) or OpenAI / Anthropic / Google (cloud); master toggle + per-provider test in Settings |
+| PDF/OCR | pdfplumber (text PDFs), pymupdf (scanned image fallback) |
 | Infrastructure | Docker + Docker Compose, Nginx |
 
 ## Prerequisites
@@ -80,12 +83,13 @@ The script will:
    - `DB_PASSWORD` — auto-generate or enter your own
    - `SECRET_KEY` — auto-generate (64 hex chars) or enter your own (min 32 chars)
    - `FRONTEND_URL` — choose localhost, your detected LAN IP, or a custom URL
-3. **Build and start all services** — runs `docker compose up -d --build`.
-4. **Health check** — polls the API until it responds, then prints the app URL.
+3. **Optionally configure AI** — choose local Ollama (pulls Gemma 4 E4B, ~4.7 GB, no data leaves your server) or a cloud provider (OpenAI / Anthropic / Google — API key only, no extra service). The app works fully without AI.
+4. **Build and start all services** — runs `docker compose up -d --build` (or `--profile ollama` for local AI).
+5. **Health check** — polls the API until it responds, then prints the app URL.
 
 Open the printed URL and register the first admin account. The first user to register automatically becomes the family Admin and creates the family — no separate setup step is needed.
 
-### Option B — Manual setup
+### Option B — Manual setup (core, no AI)
 
 ```bash
 git clone https://github.com/drprash/shreeone.git shreeone && cd shreeone
@@ -113,6 +117,33 @@ Open `http://localhost:5173` and register the first admin account. The first use
 
 **Verify:** `curl http://localhost:5173/api/health`
 
+### Option C — Manual setup with AI
+
+**Local AI (Ollama)** — pulls `gemma4:e4b` automatically on first start (~4.7 GB, no data leaves your server):
+
+```bash
+docker compose --profile ollama up -d --build
+```
+
+**Cloud AI (OpenAI / Anthropic / Google)** — no extra service; add the relevant keys to `.env` and start normally:
+
+```dotenv
+# .env — uncomment and fill ONE provider block
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+# OPENAI_MODEL=gpt-4o-mini        # optional override
+
+# LLM_PROVIDER=anthropic
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# LLM_PROVIDER=google
+# GOOGLE_AI_API_KEY=...
+```
+
+```bash
+docker compose up -d --build
+```
+
 ### Accessing from other devices on your LAN
 
 The installer detects your LAN IP and offers it as a one-step option. For manual setup:
@@ -137,6 +168,16 @@ Open Chrome → navigate to the app URL → three-dot menu → **Add to Home scr
 | `FRONTEND_URL` | Yes | `http://localhost:5173` | Base URL of the app; used for CORS and WebAuthn origin/RP-ID validation. Comma-separate multiple origins for CORS (e.g. `http://localhost:5173,http://192.168.1.10:5173`). |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` | JWT access token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | JWT refresh token lifetime |
+| `LLM_BASE_URL` | No | `http://llm:11434` | Ollama server URL (used with `--profile ollama`) |
+| `LLM_MODEL` | No | `gemma4:e4b` | Ollama model name |
+| `LLM_TIMEOUT_SECONDS` | No | `90` | LLM inference timeout in seconds |
+| `LLM_PROVIDER` | No | `local` | AI provider: `local` (Ollama), `openai`, `anthropic`, `google` |
+| `OPENAI_API_KEY` | No | — | OpenAI API key |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | OpenAI model name |
+| `ANTHROPIC_API_KEY` | No | — | Anthropic API key |
+| `ANTHROPIC_MODEL` | No | `claude-haiku-4-5-20251001` | Anthropic model name |
+| `GOOGLE_AI_API_KEY` | No | — | Google AI API key |
+| `GOOGLE_AI_MODEL` | No | `gemini-2.0-flash` | Google AI model name |
 
 ## Upgrading
 
@@ -183,6 +224,12 @@ shreeone/
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── Transactions.jsx
+│   │   │   ├── Accounts.jsx
+│   │   │   ├── Goals.jsx
+│   │   │   ├── Settings.jsx
+│   │   │   └── ...
 │   │   ├── components/
 │   │   ├── services/               # Axios API client, WebAuthn
 │   │   ├── store/                  # Zustand (auth, theme)

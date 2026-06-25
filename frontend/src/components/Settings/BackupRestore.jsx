@@ -1,8 +1,6 @@
 import React, { useState, useRef } from 'react';
 import api from '../../services/api';
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 const MODULE_LABELS = {
   core: 'Core (family, users, accounts, transactions, categories, permissions, currencies)',
   automation: 'Automation (recurring payments, budget settings)',
@@ -17,8 +15,6 @@ const formatDate = (iso) => {
     timeStyle: 'short',
   });
 };
-
-// ── sub-components ────────────────────────────────────────────────────────────
 
 const SectionCard = ({ title, description, children }) => (
   <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-6 space-y-4">
@@ -61,10 +57,7 @@ const RowCountBadge = ({ label, counts }) => (
   </div>
 );
 
-// ── main component ────────────────────────────────────────────────────────────
-
 const BackupRestore = () => {
-  // ── backup state ──
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [options, setOptions] = useState({
@@ -74,8 +67,6 @@ const BackupRestore = () => {
   });
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupError, setBackupError] = useState(null);
-
-  // ── restore state ──
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [parsedManifest, setParsedManifest] = useState(null);
@@ -85,8 +76,6 @@ const BackupRestore = () => {
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [restoreError, setRestoreError] = useState(null);
   const [restoreResult, setRestoreResult] = useState(null);
-
-  // ── backup: load preview ──────────────────────────────────────────────────
 
   const handleLoadPreview = async () => {
     setPreviewLoading(true);
@@ -100,8 +89,6 @@ const BackupRestore = () => {
       setPreviewLoading(false);
     }
   };
-
-  // ── backup: download ──────────────────────────────────────────────────────
 
   const handleDownload = async () => {
     setBackupLoading(true);
@@ -131,8 +118,6 @@ const BackupRestore = () => {
       setBackupLoading(false);
     }
   };
-
-  // ── restore: file selection ───────────────────────────────────────────────
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -169,8 +154,6 @@ const BackupRestore = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ── restore: submit ───────────────────────────────────────────────────────
-
   const handleRestore = async () => {
     setRestoreLoading(true);
     setRestoreError(null);
@@ -193,8 +176,6 @@ const BackupRestore = () => {
       setConfirmInput('');
     }
   };
-
-  // ── render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -320,7 +301,9 @@ const BackupRestore = () => {
           <strong>Destructive operation.</strong> Restoring a backup will permanently overwrite all
           current family data. This action cannot be undone. All family members will be logged out.
           Password hashes and passkey credentials are not restored — all users will need to
-          reset their passwords.
+          reset their passwords. You may also restore a backup from a <em>different</em> family
+          (e.g. after deleting and recreating a family account) — all data will be imported into
+          this family.
         </Alert>
 
         {/* File input */}

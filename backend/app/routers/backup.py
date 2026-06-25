@@ -19,7 +19,6 @@ from app.database import get_db
 router = APIRouter(prefix="/admin/backup", tags=["Backup & Restore"])
 
 
-# ── Serialization ─────────────────────────────────────────────────────────────
 
 def _val(v: Any) -> Any:
     if isinstance(v, UUID):
@@ -37,7 +36,6 @@ def _row(obj) -> dict:
     return {col.name: _val(getattr(obj, col.name)) for col in obj.__table__.columns}
 
 
-# ── HMAC helpers ──────────────────────────────────────────────────────────────
 
 def _sign(payload: dict) -> str:
     data = json.dumps(payload, sort_keys=True, default=str).encode()
@@ -48,7 +46,36 @@ def _verify(payload: dict, sig: str) -> bool:
     return hmac.compare_digest(_sign(payload), sig)
 
 
-# ── Preview ───────────────────────────────────────────────────────────────────
+def _remap_family_id(payload: dict, old_fid: str, new_fid: str) -> dict:
+    """Remap every family_id occurrence in the backup payload from old_fid to new_fid.
+
+    Used when restoring into a newly-created family whose UUID differs from the backup's.
+    User/account/transaction UUIDs are preserved as-is; only the family_id FK column
+    is rewritten so inserts land in the correct family.
+    """
+    list_tables = [
+        "users", "accounts", "categories", "member_permissions",
+        "family_currencies", "goals", "recurring_payments", "budget_settings",
+        "exchange_rates", "audit_logs",
+    ]
+    result = dict(payload)
+
+    if result.get("family_preference"):
+        fp = dict(result["family_preference"])
+        if fp.get("family_id") == old_fid:
+            fp["family_id"] = new_fid
+        result["family_preference"] = fp
+
+    for table in list_tables:
+        if result.get(table):
+            result[table] = [
+                {**row, "family_id": new_fid} if row.get("family_id") == old_fid else dict(row)
+                for row in result[table]
+            ]
+
+    return result
+
+
 
 @router.get("/preview")
 def backup_preview(
@@ -75,6 +102,12 @@ def backup_preview(
             "categories": db.query(models.Category).filter(
                 models.Category.family_id == fid, models.Category.deleted_at.is_(None)
             ).count(),
+            "goals": db.query(models.Goal).filter(
+                models.Goal.family_id == fid, models.Goal.archived_at.is_(None)
+            ).count(),
+            "goal_contributions": db.query(models.GoalContribution).join(
+                models.Goal, models.GoalContribution.goal_id == models.Goal.id
+            ).filter(models.Goal.family_id == fid).count(),
             "member_permissions": db.query(models.MemberPermission).filter(
                 models.MemberPermission.family_id == fid
             ).count(),
@@ -103,7 +136,6 @@ def backup_preview(
     }
 
 
-# ── Create backup ─────────────────────────────────────────────────────────────
 
 @router.post("")
 def create_backup(
@@ -127,7 +159,6 @@ def create_backup(
     fid = current_user.family_id
     account_ids_sq = db.query(models.Account.id).filter(models.Account.family_id == fid)
 
-    # ── Core (always) ─────────────────────────────────────────────────────────
     family = db.query(models.Family).filter(models.Family.id == fid).first()
     users = db.query(models.User).filter(
         models.User.family_id == fid, models.User.deleted_at.is_(None)
@@ -151,6 +182,12 @@ def create_backup(
     family_currencies = db.query(models.FamilyCurrency).filter(
         models.FamilyCurrency.family_id == fid
     ).all()
+    goals = db.query(models.Goal).filter(
+        models.Goal.family_id == fid, models.Goal.archived_at.is_(None)
+    ).all()
+    goal_contributions = db.query(models.GoalContribution).join(
+        models.Goal, models.GoalContribution.goal_id == models.Goal.id
+    ).filter(models.Goal.family_id == fid).all()
 
     included_modules = ["core"]
     payload: dict = {
@@ -162,9 +199,10 @@ def create_backup(
         "member_permissions": [_row(p) for p in member_permissions],
         "family_preference": _row(family_preference) if family_preference else None,
         "family_currencies": [_row(fc) for fc in family_currencies],
+        "goals": [_row(g) for g in goals],
+        "goal_contributions": [_row(gc) for gc in goal_contributions],
     }
 
-    # ── Optional: automation ──────────────────────────────────────────────────
     if include_automation:
         included_modules.append("automation")
         payload["recurring_payments"] = [
@@ -178,7 +216,6 @@ def create_backup(
             ).all()
         ]
 
-    # ── Optional: exchange rates ──────────────────────────────────────────────
     if include_exchange_rates:
         included_modules.append("exchange_rates")
         payload["exchange_rates"] = [
@@ -187,7 +224,6 @@ def create_backup(
             ).all()
         ]
 
-    # ── Optional: audit logs ──────────────────────────────────────────────────
     if include_audit_logs:
         included_modules.append("audit_logs")
         user_ids_sq = db.query(models.User.id).filter(models.User.family_id == fid)
@@ -234,7 +270,6 @@ def create_backup(
     )
 
 
-# ── Restore ───────────────────────────────────────────────────────────────────
 
 @router.post("/restore")
 async def restore_backup(
@@ -321,7 +356,7 @@ async def restore_backup(
     )
 
     try:
-        # ── Wipe existing family data (reverse FK order) ──────────────────────
+        # wipe in reverse FK order
         live_account_ids = [
             r[0] for r in db.query(models.Account.id).filter(
                 models.Account.family_id == fid
@@ -375,6 +410,19 @@ async def restore_backup(
                 models.RefreshToken.user_id.in_(live_user_ids)
             ).delete(synchronize_session=False)
 
+        live_goal_ids = [
+            r[0] for r in db.query(models.Goal.id).filter(
+                models.Goal.family_id == fid
+            ).all()
+        ]
+        if live_goal_ids:
+            db.query(models.GoalContribution).filter(
+                models.GoalContribution.goal_id.in_(live_goal_ids)
+            ).delete(synchronize_session=False)
+        db.query(models.Goal).filter(
+            models.Goal.family_id == fid
+        ).delete(synchronize_session=False)
+
         db.query(models.Account).filter(
             models.Account.family_id == fid
         ).delete(synchronize_session=False)
@@ -396,7 +444,7 @@ async def restore_backup(
 
         db.flush()
 
-        # ── Re-insert core ────────────────────────────────────────────────────
+        # re-insert
 
         # Users — password_hash intentionally excluded; users must reset passwords
         for u in payload["users"]:
@@ -547,7 +595,30 @@ async def restore_backup(
                 ON CONFLICT ON CONSTRAINT uq_family_currency DO NOTHING
             """), {k: fc.get(k) for k in ["id", "family_id", "currency_code", "added_at"]})
 
-        # ── Optional: automation ──────────────────────────────────────────────
+        # Goals
+        for g in payload.get("goals", []):
+            db.execute(text("""
+                INSERT INTO goals (id, family_id, name, type, target_amount, current_amount,
+                    currency, target_date, linked_account_id, notes,
+                    created_at, updated_at, archived_at)
+                VALUES (:id, :family_id, :name, :type, :target_amount, :current_amount,
+                    :currency, :target_date, :linked_account_id, :notes,
+                    :created_at, :updated_at, :archived_at)
+            """), {k: g.get(k) for k in [
+                "id", "family_id", "name", "type", "target_amount", "current_amount",
+                "currency", "target_date", "linked_account_id", "notes",
+                "created_at", "updated_at", "archived_at",
+            ]})
+
+        # Goal contributions
+        for gc in payload.get("goal_contributions", []):
+            db.execute(text("""
+                INSERT INTO goal_contributions (id, goal_id, amount, note, contributed_at, created_at)
+                VALUES (:id, :goal_id, :amount, :note, :contributed_at, :created_at)
+            """), {k: gc.get(k) for k in [
+                "id", "goal_id", "amount", "note", "contributed_at", "created_at",
+            ]})
+
         if "automation" in included_modules:
             for r in payload.get("recurring_payments", []):
                 db.execute(text("""
@@ -581,7 +652,6 @@ async def restore_backup(
                     "created_at", "updated_at",
                 ]})
 
-        # ── Optional: exchange rates ──────────────────────────────────────────
         if "exchange_rates" in included_modules:
             for er in payload.get("exchange_rates", []):
                 db.execute(text("""
@@ -595,7 +665,6 @@ async def restore_backup(
                     "rate", "source", "valid_date", "fetched_at",
                 ]})
 
-        # ── Optional: audit logs ──────────────────────────────────────────────
         if "audit_logs" in included_modules:
             for al in payload.get("audit_logs", []):
                 db.execute(text("""
@@ -617,18 +686,32 @@ async def restore_backup(
             detail=f"Restore failed and was fully rolled back: {str(e)}",
         )
 
-    # Audit log written after successful commit using admin's preserved user ID
-    crud.create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        action="RESTORE_COMPLETED",
-        entity_type="Family",
-        entity_id=fid,
-        new_values=(
-            f"Restore completed from backup generated at {manifest.get('generated_at')}; "
-            f"modules={included_modules}"
-        ),
-    )
+    # Audit log written after successful commit.
+    # In a cross-family restore the current_user row no longer exists (it was wiped and replaced
+    # by backup users), so find the first restored admin to avoid an FK violation.
+    audit_user_id = current_user.id
+    if is_cross_family:
+        restored_admin = db.query(models.User).filter(
+            models.User.family_id == fid,
+            models.User.role == models.Role.ADMIN,
+        ).first()
+        if restored_admin:
+            audit_user_id = restored_admin.id
+
+    try:
+        crud.create_audit_log(
+            db=db,
+            user_id=audit_user_id,
+            action="RESTORE_COMPLETED",
+            entity_type="Family",
+            entity_id=fid,
+            new_values=(
+                f"Restore completed from backup generated at {manifest.get('generated_at')}; "
+                f"modules={included_modules}; cross_family={is_cross_family}"
+            ),
+        )
+    except Exception:
+        pass  # Non-fatal — data already committed
 
     warnings = [
         "All active sessions have been invalidated — all family members must log in again.",

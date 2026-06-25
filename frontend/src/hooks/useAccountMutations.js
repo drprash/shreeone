@@ -119,7 +119,7 @@ export function useDeleteAccount() {
   const { isOnline } = useOfflineQueue();
   const queryClient = useQueryClient();
 
-  const saveOffline = async (id) => {
+  const saveOffline = async ({ id }) => {
     queryClient.setQueriesData(
       { queryKey: queryKeys.accounts() },
       (old) => Array.isArray(old) ? old.filter(a => a.id !== id) : old
@@ -140,23 +140,23 @@ export function useDeleteAccount() {
   };
 
   const onlineMutation = useMutation({
-    mutationFn: (id) => api.delete(`/accounts/${id}`),
-    onSuccess: () => {
-      toast.success('Account deleted');
+    mutationFn: ({ id }) => api.delete(`/accounts/${id}`),
+    onSuccess: (_, variables) => {
+      toast.success(variables.successMessage ?? 'Account deleted');
       invalidateAccounts(queryClient);
     },
-    onError: async (error, id) => {
-      if (!error.response) { await saveOffline(id); return; }
+    onError: async (error, variables) => {
+      if (!error.response) { await saveOffline(variables); return; }
       toast.error(error.response.data?.detail || 'Failed to delete account');
     },
   });
 
-  const mutate = async (id) => {
+  const mutate = async (variables) => {
     if (isOnline) {
-      onlineMutation.mutate(id);
+      onlineMutation.mutate(variables);
       return;
     }
-    await saveOffline(id);
+    await saveOffline(variables);
   };
 
   return { mutate, isPending: onlineMutation.isPending };

@@ -3,9 +3,9 @@ import { formatCurrency } from '../../utils/formatters';
 const CategoryChart = ({ data, baseCurrency = 'USD' }) => {
   if (!data || data.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100">
-        <h3 className="text-lg font-semibold mb-4">Spending by Category</h3>
-        <p className="text-gray-500 text-center py-8">No data available</p>
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:border-slate-700">
+        <h3 className="text-lg font-semibold mb-4 dark:text-slate-100">Spending by Category</h3>
+        <p className="text-gray-500 dark:text-slate-400 text-center py-8">No data available</p>
       </div>
     );
   }

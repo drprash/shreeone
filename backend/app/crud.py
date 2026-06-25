@@ -1,6 +1,6 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 from uuid import UUID
 from datetime import datetime
 from app import models, schemas, auth
@@ -130,7 +130,8 @@ def get_account(db: Session, account_id: UUID) -> Optional[models.Account]:
     if not account:
         return None
 
-    _refresh_credit_card_balances(db, [account])
+    _refresh_liability_balances(db, [account])
+    _attach_transaction_counts(db, [account])
     return account
 
 def get_family_accounts(db: Session, family_id: UUID, user: models.User) -> List[models.Account]:
@@ -152,19 +153,20 @@ def get_family_accounts(db: Session, family_id: UUID, user: models.User) -> List
 
     query = query.order_by(models.Account.type, models.Account.sort_order, models.Account.created_at)
     accounts = query.all()
-    _refresh_credit_card_balances(db, accounts)
+    _refresh_liability_balances(db, accounts)
+    _attach_transaction_counts(db, accounts)
     return accounts
 
 
-def _refresh_credit_card_balances(db: Session, accounts: List[models.Account]) -> None:
-    credit_accounts = [a for a in accounts if a.type == models.AccountType.CREDIT_CARD]
-    if not credit_accounts:
+def _refresh_liability_balances(db: Session, accounts: List[models.Account]) -> None:
+    liability_accounts = [a for a in accounts if a.type in models.LIABILITY_ACCOUNT_TYPES]
+    if not liability_accounts:
         return
 
     from app.financial_logic import FinancialEngine
 
     has_updates = False
-    for account in credit_accounts:
+    for account in liability_accounts:
         recalculated_balance = FinancialEngine.calculate_account_balance(db, str(account.id))
         if account.current_balance != recalculated_balance:
             account.current_balance = recalculated_balance
@@ -172,8 +174,25 @@ def _refresh_credit_card_balances(db: Session, accounts: List[models.Account]) -
 
     if has_updates:
         db.commit()
-        for account in credit_accounts:
+        for account in liability_accounts:
             db.refresh(account)
+
+def _attach_transaction_counts(db: Session, accounts: List[models.Account]) -> None:
+    if not accounts:
+        return
+    account_ids = [a.id for a in accounts]
+    counts = dict(
+        db.query(models.Transaction.account_id, func.count(models.Transaction.id))
+        .filter(
+            models.Transaction.account_id.in_(account_ids),
+            models.Transaction.deleted_at.is_(None)
+        )
+        .group_by(models.Transaction.account_id)
+        .all()
+    )
+    for account in accounts:
+        account.transaction_count = counts.get(account.id, 0)
+
 
 def update_account(db: Session, account_id: UUID, account_update: schemas.AccountUpdate) -> Optional[models.Account]:
     db_account = get_account(db, account_id)
@@ -194,22 +213,21 @@ def update_account(db: Session, account_id: UUID, account_update: schemas.Accoun
     return db_account
 
 def delete_account(db: Session, account_id: UUID) -> bool:
-    # Check for transactions
-    transaction_count = db.query(models.Transaction).filter(
-        models.Transaction.account_id == account_id,
-        models.Transaction.deleted_at.is_(None)
-    ).count()
-    
-    if transaction_count > 0:
-        raise ValueError("Cannot delete account with existing transactions")
-    
     db_account = get_account(db, account_id)
     if not db_account:
         return False
-    
+
     db_account.deleted_at = datetime.utcnow()
     db.commit()
     return True
+
+
+def get_account_including_archived(db: Session, account_id: UUID) -> Optional[models.Account]:
+    return db.query(models.Account).options(
+        joinedload(models.Account.owner)
+    ).filter(
+        models.Account.id == account_id
+    ).first()
 
 # Category operations
 def create_category(db: Session, category: schemas.CategoryCreate, family_id: UUID) -> models.Category:
@@ -456,21 +474,23 @@ def delete_transaction(db: Session, transaction_id: UUID, user: models.User) -> 
     if user.role != models.Role.ADMIN and db_transaction.created_by_user_id != user.id:
         raise PermissionError("Cannot delete transaction created by another user")
     
-    db_transaction.deleted_at = datetime.utcnow()
-    db.commit()
-    
-    # Update account balance
-    from app.financial_logic import FinancialEngine
-    FinancialEngine.update_account_balance(db, str(db_transaction.account_id))
-    
-    # If transfer, delete linked transaction too
+    # Find linked leg BEFORE marking anything deleted so get_transaction can find it
+    linked = None
     if db_transaction.linked_transaction_id:
         linked = get_transaction(db, db_transaction.linked_transaction_id)
-        if linked:
-            linked.deleted_at = datetime.utcnow()
-            FinancialEngine.update_account_balance(db, str(linked.account_id))
-            db.commit()
-    
+
+    # Soft-delete both legs in a single commit so no crash window can leave one active
+    db_transaction.deleted_at = datetime.utcnow()
+    if linked:
+        linked.deleted_at = datetime.utcnow()
+    db.commit()
+
+    # Update balances after both are safely committed
+    from app.financial_logic import FinancialEngine
+    FinancialEngine.update_account_balance(db, str(db_transaction.account_id))
+    if linked:
+        FinancialEngine.update_account_balance(db, str(linked.account_id))
+
     return True
 
 # Audit log

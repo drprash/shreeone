@@ -10,6 +10,8 @@ venv/
 .venv/
 tests/
 backups/
+uploads/
+models/
 *.log
 .git/
 Dockerfile

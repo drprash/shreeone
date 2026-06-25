@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import api from '../../services/api';
 import { formatCurrency } from '../../utils/formatters';
+import { useAuthStore } from '../../store/authStore';
 
 const COUNTRY_FLAGS = {
   IN: '🇮🇳', US: '🇺🇸', GB: '🇬🇧', AE: '🇦🇪', SG: '🇸🇬',
@@ -11,10 +12,16 @@ const COUNTRY_FLAGS = {
   JP: '🇯🇵', MY: '🇲🇾', TH: '🇹🇭',
 };
 
-export default function CountryBreakdownWidget() {
+export default function CountryBreakdownWidget({ selectedMemberId = 'family' }) {
+  const { user } = useAuthStore();
+  const isAdminMemberView = user?.role === 'ADMIN' && selectedMemberId !== 'family';
+
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['dashboard', 'country-breakdown'],
-    queryFn: () => api.get('/dashboard/country-breakdown').then(r => r.data),
+    queryKey: ['dashboard', 'country-breakdown', user?.id, selectedMemberId],
+    queryFn: () => {
+      const params = isAdminMemberView ? { member_id: selectedMemberId } : {};
+      return api.get('/dashboard/country-breakdown', { params }).then(r => r.data);
+    },
     staleTime: 5 * 60 * 1000,
   });
 

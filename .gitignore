@@ -11,8 +11,7 @@
 .idea/
 .vscode/
 .claude/
-.DS_Store
-Thumbs.db
+.codegraph/
 *.swp
 *.swo
 *~
@@ -71,7 +70,6 @@ backups/*
 !backups/.gitkeep
 ssl/*
 !ssl/.gitkeep
-# Phase 2 — LLM model files (~2.5 GB, downloaded via scripts/download_models.sh)
 models/*
 !models/.gitkeep
 *.pid
@@ -102,8 +100,5 @@ ehthumbs.db
 Thumbs.db
 
 # Runtime and generated data
-docker-compose.test.yml
-scripts/run-container-tests.sh
-SHREEONE_PROJECT_PLAN.md
 CLAUDE.md
 docs/

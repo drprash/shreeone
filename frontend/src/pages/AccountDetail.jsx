@@ -1,19 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { 
-  ArrowLeft, 
-  Plus, 
-  ArrowRightLeft, 
-  TrendingUp, 
+import {
+  ArrowLeft,
+  Plus,
+  ArrowRightLeft,
+  TrendingUp,
   TrendingDown,
-  X
+  X,
+  Sparkles
 } from 'lucide-react';
 import { formatAccountDisplayName, formatCurrency, formatDate } from '../utils/formatters';
 import { getCountryDisplay } from '../utils/typeHelpers';
-import { toNaiveDateTimeString, toNaiveLocalDateTimeString } from '../utils/dateUtils';
+import { useAIStatus } from '../hooks/useAIStatus';
+import { categorizeTransaction } from '../services/aiAPI';
+import { toNaiveDateTimeString, toNaiveLocalDateTimeString, formatDateForInput, parseDateForPicker } from '../utils/dateUtils';
 import { queryKeys } from '../utils/queryKeys';
 import LoadingSpinner from '../components/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -38,6 +41,24 @@ const AccountDetail = () => {
     tx_currency: '',
     exchange_rate_to_base: '',
   });
+  const [aiSuggestion, setAiSuggestion] = useState(null);
+  const categorizationTimer = useRef(null);
+  const aiStatus = useAIStatus();
+  const aiAvailable = aiStatus.ai_services_enabled;
+
+  const handleDescriptionChange = useCallback((description) => {
+    setAiSuggestion(null);
+    clearTimeout(categorizationTimer.current);
+    if (!aiAvailable || !aiStatus.ai_categorization_enabled || description.length < 3) return;
+    categorizationTimer.current = setTimeout(async () => {
+      try {
+        const result = await categorizeTransaction(description);
+        if (result?.category_id) setAiSuggestion(result);
+      } catch { /* silent — AI is optional */ }
+    }, 1000);
+  }, [aiAvailable, aiStatus.ai_categorization_enabled]);
+
+  useEffect(() => () => clearTimeout(categorizationTimer.current), []);
 
   // Fetch account details
   const { data: account, isLoading: accountLoading } = useQuery({
@@ -108,6 +129,7 @@ const AccountDetail = () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.transactionsByAccountAll(accountId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.account(accountId) });
       setShowTransactionModal(false);
+      setAiSuggestion(null);
       setTransactionForm({
         type: 'EXPENSE',
         amount: '',
@@ -408,7 +430,9 @@ const AccountDetail = () => {
                   <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
                   <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
                   <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                  {dateFilter === 'all' && (
+                    <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -445,9 +469,11 @@ const AccountDetail = () => {
                        transaction.type === 'EXPENSE' ? '-' : ''}
                       {formatCurrency(transaction.amount, transaction.currency)}
                     </td>
-                    <td className="hidden sm:table-cell px-3 sm:px-6 py-3 sm:py-4 text-sm text-right text-gray-900 whitespace-nowrap">
-                      {formatCurrency(transaction.runningBalance, account.currency)}
-                    </td>
+                    {dateFilter === 'all' && (
+                      <td className="hidden sm:table-cell px-3 sm:px-6 py-3 sm:py-4 text-sm text-right text-gray-900 whitespace-nowrap">
+                        {formatCurrency(transaction.runningBalance, account.currency)}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -505,7 +531,7 @@ const AccountDetail = () => {
                       type="radio"
                       value="EXPENSE"
                       checked={transactionForm.type === 'EXPENSE'}
-                      onChange={(e) => setTransactionForm({...transactionForm, type: e.target.value, category_id: ''})}
+                      onChange={(e) => { setTransactionForm({...transactionForm, type: e.target.value, category_id: ''}); setAiSuggestion(null); }}
                       className="mr-2"
                     />
                     <span className="text-red-600">
@@ -517,7 +543,7 @@ const AccountDetail = () => {
                       type="radio"
                       value="INCOME"
                       checked={transactionForm.type === 'INCOME'}
-                      onChange={(e) => setTransactionForm({...transactionForm, type: e.target.value, category_id: ''})}
+                      onChange={(e) => { setTransactionForm({...transactionForm, type: e.target.value, category_id: ''}); setAiSuggestion(null); }}
                       className="mr-2"
                     />
                     <span className="text-green-600">
@@ -531,6 +557,20 @@ const AccountDetail = () => {
               {transactionForm.type !== 'TRANSFER' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                  {aiSuggestion && (
+                    <div className="flex items-center gap-2 mb-1.5 px-2 py-1 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-700">
+                      <Sparkles className="w-3 h-3 shrink-0" />
+                      <span>AI suggests: <strong>{aiSuggestion.category}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => { setTransactionForm(f => ({...f, category_id: aiSuggestion.category_id})); setAiSuggestion(null); }}
+                        className="ml-auto px-2 py-0.5 bg-violet-600 text-white rounded text-xs hover:bg-violet-700"
+                      >
+                        Accept
+                      </button>
+                      <button type="button" onClick={() => setAiSuggestion(null)} className="text-violet-400 hover:text-violet-600">✕</button>
+                    </div>
+                  )}
                   <select
                     value={transactionForm.category_id}
                     onChange={(e) => setTransactionForm({...transactionForm, category_id: e.target.value})}
@@ -628,9 +668,20 @@ const AccountDetail = () => {
                 <input
                   type="text"
                   value={transactionForm.description}
-                  onChange={(e) => setTransactionForm({...transactionForm, description: e.target.value})}
+                  onChange={(e) => { setTransactionForm({...transactionForm, description: e.target.value}); handleDescriptionChange(e.target.value); }}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="What's this for?"
+                />
+              </div>
+
+              {/* Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={formatDateForInput(transactionForm.transaction_date)}
+                  onChange={(e) => setTransactionForm({...transactionForm, transaction_date: parseDateForPicker(e.target.value)})}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
@@ -691,6 +742,7 @@ const TransferModal = ({ fromAccount, accounts, onClose, onSuccess }) => {
   const [toAccountId, setToAccountId] = useState('');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  const [transferDate, setTransferDate] = useState(new Date());
   const [conversionRate, setConversionRate] = useState('1.00');
   const [loading, setLoading] = useState(false);
 
@@ -723,7 +775,7 @@ const TransferModal = ({ fromAccount, accounts, onClose, onSuccess }) => {
       account_id: fromAccount.id,
       target_account_id: toAccountId,
       description: description || `Transfer from ${formatAccountDisplayName(fromAccount)}`,
-      transaction_date: toNaiveDateTimeString(new Date())
+      transaction_date: toNaiveDateTimeString(transferDate)
     };
 
     if (isCrossCurrency && conversionRate) {
@@ -843,6 +895,17 @@ const TransferModal = ({ fromAccount, accounts, onClose, onSuccess }) => {
               onChange={(e) => setDescription(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               placeholder="What's this transfer for?"
+            />
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+            <input
+              type="date"
+              value={formatDateForInput(transferDate)}
+              onChange={(e) => setTransferDate(parseDateForPicker(e.target.value))}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
 

@@ -37,16 +37,14 @@ gen_secret() {
     if command -v openssl &>/dev/null; then
         openssl rand -hex "$bytes"
     else
-        # fallback: /dev/urandom  (|| true absorbs SIGPIPE from head closing the pipe)
-        tr -dc 'a-f0-9' < /dev/urandom | head -c $(( bytes * 2 )) || true
+        tr -dc 'a-f0-9' < /dev/urandom | head -c $(( bytes * 2 ))
     fi
 }
 
 # Detect the primary LAN IP (non-loopback)
 detect_lan_ip() {
-    # Try hostname -I first (Linux), then ip route, then ifconfig
     if command -v hostname &>/dev/null && hostname -I &>/dev/null 2>&1; then
-        echo "$(hostname -I | awk '{print $1}')"
+        hostname -I | awk '{print $1}'
     elif command -v ip &>/dev/null; then
         ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}'
     elif command -v ifconfig &>/dev/null; then
@@ -58,7 +56,7 @@ detect_lan_ip() {
 ask() {
     local prompt="$1"
     local default="${2:-}"
-    local secret="${3:-false}"   # if "true", hide input
+    local secret="${3:-false}"
     local value
 
     if [[ -n "$default" ]]; then
@@ -69,7 +67,7 @@ ask() {
 
     if [[ "$secret" == "true" ]]; then
         read -r -s -p "$(echo -e "${BOLD}${prompt}:${RESET} ")" value
-        echo  # newline after silent input
+        echo
     else
         read -r -p "$(echo -e "${BOLD}${prompt}:${RESET} ")" value
     fi
@@ -86,13 +84,62 @@ echo ""
 info "This script will:"
 echo "  1. Check / install Docker and Docker Compose"
 echo "  2. Configure environment variables"
-echo "  3. Build and start all services"
+echo "  3. Optionally configure AI features (local Ollama or cloud provider)"
+echo "  4. Build and start all services"
+echo "  5. Verify the API is healthy"
 echo ""
 confirm "Continue?" Y || { echo "Aborted."; exit 0; }
 echo ""
 
 # ── 1. Dependency checks / installs ──────────────────────────────────────────
 bold "── Step 1: Dependencies ─────────────────────────────────────"
+
+install_docker_linux() {
+    if [[ ! -f /etc/os-release ]]; then
+        die "Cannot detect Linux distro. Install Docker manually: https://docs.docker.com/get-docker/"
+    fi
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    case "${ID:-}" in
+        ubuntu|debian)
+            info "Installing Docker via apt..."
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            sudo chmod a+r /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
+                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            success "Docker installed. You may need to log out and back in for group membership to take effect."
+            ;;
+        fedora|rhel|centos|rocky|almalinux)
+            info "Installing Docker via dnf/yum..."
+            sudo dnf -y install dnf-plugins-core 2>/dev/null || sudo yum -y install yum-utils
+            sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null || \
+                sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || \
+                sudo yum -y install docker-ce docker-ce-cli containerd.io
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            success "Docker installed."
+            ;;
+        arch|manjaro)
+            info "Installing Docker via pacman..."
+            sudo pacman -Sy --noconfirm docker docker-compose
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "$USER"
+            success "Docker installed."
+            ;;
+        *)
+            die "Unsupported distro '${ID}'. Install Docker manually: https://docs.docker.com/get-docker/"
+            ;;
+    esac
+}
 
 check_or_install_docker() {
     if command -v docker &>/dev/null; then
@@ -166,15 +213,10 @@ https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
                         ;;
                 esac
             else
-                die "Cannot detect Linux distro. Install Docker manually: https://docs.docker.com/get-docker/"
+                die "Install Docker Desktop from https://docs.docker.com/desktop/mac/ then re-run this script."
             fi
             ;;
-        Darwin)
-            die "On macOS, install Docker Desktop from https://docs.docker.com/desktop/mac/ and re-run this script."
-            ;;
-        *)
-            die "Unsupported OS '${os}'. Install Docker manually: https://docs.docker.com/get-docker/"
-            ;;
+        *)       die "Unsupported OS '${os}'. Install Docker manually: https://docs.docker.com/get-docker/" ;;
     esac
 }
 
@@ -197,21 +239,23 @@ if ! docker info &>/dev/null 2>&1; then
 fi
 
 # Verify Docker Compose (v2 plugin or standalone)
+COMPOSE_CMD=""
 if docker compose version &>/dev/null 2>&1; then
     success "Docker Compose v2 (plugin) is available."
+    COMPOSE_CMD="docker compose"
 elif command -v docker-compose &>/dev/null; then
-    # Standalone v1 — still works but warn
-    warn "docker-compose v1 detected. Preferring it. Consider upgrading to Docker Compose v2."
+    warn "docker-compose v1 detected. Consider upgrading to Docker Compose v2."
     COMPOSE_CMD="docker-compose"
 else
     warn "Docker Compose not found."
     if confirm "Install Docker Compose plugin automatically (requires sudo)?" Y; then
-        os=$(uname -s)
-        if [[ "$os" == "Linux" ]]; then
+        local_os=$(uname -s)
+        if [[ "$local_os" == "Linux" ]]; then
             sudo apt-get install -y -qq docker-compose-plugin 2>/dev/null || \
                 sudo dnf -y install docker-compose-plugin 2>/dev/null || \
-                die "Could not install Docker Compose automatically. Install from https://docs.docker.com/compose/install/"
+                die "Could not install Docker Compose automatically. See https://docs.docker.com/compose/install/"
             success "Docker Compose installed."
+            COMPOSE_CMD="docker compose"
         else
             die "Install Docker Compose from https://docs.docker.com/compose/install/ and re-run."
         fi
@@ -219,8 +263,6 @@ else
         die "Docker Compose is required."
     fi
 fi
-
-COMPOSE_CMD="${COMPOSE_CMD:-docker compose}"
 
 echo ""
 
@@ -235,16 +277,13 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
     die ".env.example not found in ${SCRIPT_DIR}. Is this the ShreeOne project directory?"
 fi
 
+SKIP_ENV=false
 if [[ -f "$ENV_FILE" ]]; then
     warn ".env file already exists."
     if ! confirm "Overwrite it with new configuration?" N; then
         info "Keeping existing .env. Skipping configuration step."
         SKIP_ENV=true
-    else
-        SKIP_ENV=false
     fi
-else
-    SKIP_ENV=false
 fi
 
 if [[ "$SKIP_ENV" == "false" ]]; then
@@ -329,50 +368,157 @@ SECRET_KEY=${SECRET_KEY}
 FRONTEND_URL=${FRONTEND_URL}
 ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
 REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS}
+
+# ── AI (optional) ─────────────────────────────────────────────────────────────
+# Local Ollama: start with --profile ollama. Defaults are applied automatically.
+# LLM_BASE_URL=http://llm:11434
+# LLM_MODEL=gemma4:e4b
+# LLM_TIMEOUT_SECONDS=90
+# Cloud AI: uncomment the provider(s) you want and set API keys. Multiple providers
+# can be configured — the app will test all and auto-select the best one.
+# OPENAI_API_KEY=
+# OPENAI_MODEL=gpt-4o-mini
+# OPENAI_BASE_URL=
+# ANTHROPIC_API_KEY=
+# ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+# GOOGLE_AI_API_KEY=
+# GOOGLE_AI_MODEL=gemini-2.0-flash
 EOF
 
     success ".env written to ${ENV_FILE}"
 fi
 echo ""
 
-# ── 3. Build and start ────────────────────────────────────────────────────────
-bold "── Step 3: Build & Start Services ──────────────────────────"
+# ── 3. AI — optional setup ────────────────────────────────────────────────────
+bold "── Step 3: AI Setup (Optional) ─────────────────────────────"
+echo ""
+info "ShreeOne includes optional AI features:"
+echo "  • Transaction auto-categorisation"
+echo "  • Receipt OCR (scan receipts with your camera)"
+echo "  • Voice / smart-text transaction entry"
+echo "  • Monthly narrative & weekly spending digest"
+echo "  • Bank statement import (PDF or image)"
+echo ""
+info "Two AI options are available:"
+echo "  1) Local Ollama  — on-device, no data leaves your server (gemma4:e4b, ~4.7 GB)"
+echo "  2) Cloud AI      — configure one or more of OpenAI, Anthropic, Google (API key required)"
+echo "  3) Skip          — the app works fully without AI; you can configure it later"
+echo ""
+info "After install, enable AI in the app via Settings → AI Features."
+info "The master toggle will test your connection automatically before activating."
+echo ""
 
-cd "$SCRIPT_DIR"
+ENABLE_AI=false
+read -r -p "$(echo -e "${BOLD}  Choose AI option [1/2/3]:${RESET} ")" ai_choice
+case "${ai_choice:-3}" in
+    1)
+        ENABLE_AI=ollama
+        warn "  Hardware requirements: approximately 8 GB RAM and 6 GB free disk space."
+        info "  gemma4:e4b (~4.7 GB) will be downloaded on first start — this may take several minutes."
+        ;;
+    2)
+        echo ""
+        bold "  Configure cloud AI providers"
+        info "  You can configure multiple providers — the app tests all of them"
+        info "  and auto-selects the best one when you enable AI in Settings."
+        info "  Press Enter to skip any provider."
+        echo ""
+
+        CONFIGURED_PROVIDERS=()
+
+        bold "  OpenAI"
+        OPENAI_KEY=$(ask "  OPENAI_API_KEY" "" "true")
+        if [[ -n "$OPENAI_KEY" ]]; then
+            OPENAI_MODEL_VAL=$(ask "  Model" "gpt-4o-mini")
+            CONFIGURED_PROVIDERS+=("openai")
+        fi
+        echo ""
+
+        bold "  Anthropic"
+        ANTHROPIC_KEY=$(ask "  ANTHROPIC_API_KEY" "" "true")
+        if [[ -n "$ANTHROPIC_KEY" ]]; then
+            ANTHROPIC_MODEL_VAL=$(ask "  Model" "claude-haiku-4-5-20251001")
+            CONFIGURED_PROVIDERS+=("anthropic")
+        fi
+        echo ""
+
+        bold "  Google"
+        GOOGLE_KEY=$(ask "  GOOGLE_AI_API_KEY" "" "true")
+        if [[ -n "$GOOGLE_KEY" ]]; then
+            GOOGLE_MODEL_VAL=$(ask "  Model" "gemini-2.0-flash")
+            CONFIGURED_PROVIDERS+=("google")
+        fi
+        echo ""
 
 info "Running: ${COMPOSE_CMD} up -d --build"
 info "On the first run this can take 5–10 minutes (downloading images and compiling). Please wait..."
 echo ""
-$COMPOSE_CMD up -d --build
+
+# ── 4. Build and start ────────────────────────────────────────────────────────
+bold "── Step 4: Build & Start Services ──────────────────────────"
+
+cd "$SCRIPT_DIR"
+
+# Pre-flight: check if port 5173 is already bound by another process
+if ss -tlnp 2>/dev/null | grep -q ':5173 '; then
+    warn "Port 5173 is already in use by another process."
+    warn "Either stop that process first, or edit the 'ports' mapping in docker-compose.yml."
+    confirm "Continue anyway?" N || exit 0
+fi
+
+if [[ "$ENABLE_AI" == "ollama" ]]; then
+    info "Starting full stack with local AI (Ollama + Gemma 4 E4B)..."
+    info "Running: ${COMPOSE_CMD} --profile ollama up -d --build"
+    echo ""
+    $COMPOSE_CMD --profile ollama up -d --build
+else
+    info "Starting core stack..."
+    info "Running: ${COMPOSE_CMD} up -d --build"
+    echo ""
+    $COMPOSE_CMD up -d --build
+fi
 echo ""
 
-# ── 4. Health check ───────────────────────────────────────────────────────────
-bold "── Step 4: Health Check ─────────────────────────────────────"
+# ── 5. Health check ───────────────────────────────────────────────────────────
+bold "── Step 5: Health Check ─────────────────────────────────────"
+
+SKIP_HEALTH=false
+if ! command -v curl &>/dev/null; then
+    info "curl not found — installing..."
+    sudo apt-get install -y -qq curl 2>/dev/null || \
+        sudo dnf -y install curl 2>/dev/null || \
+        sudo pacman -Sy --noconfirm curl 2>/dev/null || \
+        { warn "Could not install curl automatically. Skipping health check."; SKIP_HEALTH=true; }
+fi
 
 HEALTH_URL="http://localhost:5173/api/health"
 MAX_WAIT=180
 INTERVAL=5
 elapsed=0
 
-info "Waiting for the API to become healthy (up to ${MAX_WAIT}s)..."
-until curl -fsS "$HEALTH_URL" &>/dev/null; do
-    if (( elapsed >= MAX_WAIT )); then
-        warn "Health check timed out after ${MAX_WAIT}s."
-        warn "Services may still be starting. Check logs with:"
-        echo "    ${COMPOSE_CMD} logs -f"
-        break
-    fi
-    echo -n "."
-    sleep "$INTERVAL"
-    elapsed=$(( elapsed + INTERVAL ))
-done
+if [[ "$SKIP_HEALTH" == "false" ]]; then
+    info "Waiting for the API to become healthy (up to ${MAX_WAIT}s)..."
+    until curl -fsS "$HEALTH_URL" &>/dev/null; do
+        if (( elapsed >= MAX_WAIT )); then
+            warn "Health check timed out after ${MAX_WAIT}s."
+            warn "Services may still be starting. Check logs with:"
+            echo "    ${COMPOSE_CMD} logs -f"
+            break
+        fi
+        echo -n "."
+        sleep "$INTERVAL"
+        elapsed=$(( elapsed + INTERVAL ))
+    done
 
-if curl -fsS "$HEALTH_URL" &>/dev/null; then
-    echo ""
-    success "API is healthy!"
+    if curl -fsS "$HEALTH_URL" &>/dev/null; then
+        echo ""
+        success "API is healthy!"
+    fi
+else
+    info "Skipping health check (curl unavailable)."
 fi
 
-# ── 5. Done ───────────────────────────────────────────────────────────────────
+# ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 bold "============================================================"
 bold "  ShreeOne is up and running!"
@@ -386,10 +532,19 @@ echo -e "  ${GREEN}App URL:${RESET}        ${BOLD}${DISPLAY_URL}${RESET}"
 echo -e "  ${GREEN}API health:${RESET}     ${BOLD}${DISPLAY_URL}/api/health${RESET}"
 echo ""
 echo "  Useful commands:"
-echo "    ${COMPOSE_CMD} logs -f          # stream logs from all services"
-echo "    ${COMPOSE_CMD} ps               # check service status"
-echo "    ${COMPOSE_CMD} down             # stop all services"
-echo "    bash scripts/backup.sh         # manual database backup"
+echo "    ${COMPOSE_CMD} logs -f                                    # stream logs from all services"
+echo "    ${COMPOSE_CMD} ps                                         # check service status"
+echo "    ${COMPOSE_CMD} down                                       # stop all services"
+echo "    bash scripts/backup.sh                                   # manual database backup"
+echo "    ${COMPOSE_CMD} --profile ollama up -d --build            # start with local AI (Ollama)"
+echo "    ${COMPOSE_CMD} up -d --build                             # start without AI (or with cloud AI via .env)"
 echo ""
 info "Register the first admin account by opening the app URL in your browser."
 echo ""
+if [[ "$ENABLE_AI" != "false" ]]; then
+    info "AI keys are configured. To activate AI features after logging in:"
+    echo "    1. Open Settings → AI Features"
+    echo "    2. Turn on the master AI toggle — it tests your connection automatically"
+    echo "    3. Toggle individual features (categorisation, narratives, OCR, etc.) as needed"
+    echo ""
+fi

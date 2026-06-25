@@ -28,7 +28,7 @@ confirm() {
     [[ "$default" == "Y" ]] && choices="[Y/n]" || choices="[y/N]"
     read -r -p "$(echo -e "${BOLD}${prompt}${RESET} ${choices} ")" answer
     answer="${answer:-$default}"
-    [[ "$answer" =~ ^[Yy]$ ]]
+    [[ "$answer" =~ ^[Yy](es)?$ ]]
 }
 
 # Generate a random hex string of given byte-length (defaults to 32 → 64 hex chars)
@@ -157,19 +157,61 @@ check_or_install_docker() {
     local os
     os=$(uname -s)
     case "$os" in
-        Linux)   install_docker_linux ;;
-        Darwin)
-            if [[ -d "/Applications/Docker.app" ]]; then
-                warn "Docker Desktop is installed but not running."
-                info "Starting Docker Desktop..."
-                open -a Docker
-                info "Wait for Docker to fully start (watch the menu-bar whale icon), then re-run this script."
-                exit 0
-            elif command -v brew &>/dev/null; then
-                info "Installing Docker Desktop via Homebrew..."
-                brew install --cask docker
-                info "Open Docker from your Applications folder, wait for it to start, then re-run this script."
-                exit 0
+        Linux)
+            if [[ -f /etc/os-release ]]; then
+                # shellcheck source=/dev/null
+                source /etc/os-release
+                case "${ID:-}" in
+                    ubuntu|debian)
+                        info "Installing Docker via apt..."
+                        sudo apt-get update -qq
+                        sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+                        sudo install -m 0755 -d /etc/apt/keyrings
+                        curl -fsSL https://download.docker.com/linux/${ID}/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+                        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/${ID} $(lsb_release -cs) stable" | \
+                            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                        sudo apt-get update -qq
+                        sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                        if grep -qi microsoft /proc/version 2>/dev/null; then
+                            info "WSL2 detected — skipping systemctl (start Docker Desktop on Windows instead)."
+                        else
+                            sudo systemctl enable --now docker
+                        fi
+                        sudo usermod -aG docker "$USER"
+                        success "Docker installed."
+                        ;;
+                    fedora|rhel|centos|rocky|almalinux)
+                        info "Installing Docker via dnf/yum..."
+                        sudo dnf -y install dnf-plugins-core 2>/dev/null || sudo yum -y install yum-utils
+                        sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null || \
+                            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                        sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || \
+                            sudo yum -y install docker-ce docker-ce-cli containerd.io
+                        if grep -qi microsoft /proc/version 2>/dev/null; then
+                            info "WSL2 detected — skipping systemctl (start Docker Desktop on Windows instead)."
+                        else
+                            sudo systemctl enable --now docker
+                        fi
+                        sudo usermod -aG docker "$USER"
+                        success "Docker installed."
+                        ;;
+                    arch|manjaro)
+                        info "Installing Docker via pacman..."
+                        sudo pacman -Sy --noconfirm docker docker-compose
+                        if grep -qi microsoft /proc/version 2>/dev/null; then
+                            info "WSL2 detected — skipping systemctl (start Docker Desktop on Windows instead)."
+                        else
+                            sudo systemctl enable --now docker
+                        fi
+                        sudo usermod -aG docker "$USER"
+                        success "Docker installed."
+                        ;;
+                    *)
+                        die "Unsupported distro '${ID}'. Install Docker manually: https://docs.docker.com/get-docker/"
+                        ;;
+                esac
             else
                 die "Install Docker Desktop from https://docs.docker.com/desktop/mac/ then re-run this script."
             fi
@@ -180,13 +222,18 @@ check_or_install_docker() {
 
 check_or_install_docker
 
-# Guard: after a fresh Docker install the current session lacks the new docker group membership.
+# After a fresh Docker install the current shell does not yet have the docker
+# group, so docker commands fail with "permission denied". Detect this early
+# and ask the user to re-login rather than letting a cryptic error appear later.
 if ! docker info &>/dev/null 2>&1; then
-    warn "Docker is installed but unreachable in this session."
-    info "This is normal after a first-time install — the docker group change needs a new login."
     echo ""
-    info "Log out and back in, then re-run this script from the ShreeOne directory:"
-    echo "    bash install.sh"
+    warn "Docker is installed but this terminal session doesn't have access yet."
+    warn "This is normal after a fresh install — your user was added to the 'docker' group"
+    warn "but the change only takes effect after you log out and log back in."
+    echo ""
+    bold "  Next steps:"
+    echo "    1. Close this terminal (log out and back in, or restart your computer)."
+    echo "    2. Re-run this script:  bash install.sh"
     echo ""
     exit 0
 fi
@@ -403,44 +450,8 @@ case "${ai_choice:-3}" in
         fi
         echo ""
 
-        if [[ ${#CONFIGURED_PROVIDERS[@]} -eq 0 ]]; then
-            warn "  No API keys entered. Skipping cloud AI."
-            info "  To add providers later, edit .env and restart."
-        else
-            {
-                echo ""
-                echo "# ── Cloud AI ────────────────────────────────────────────────────────────────"
-                if [[ -n "${OPENAI_KEY:-}" ]]; then
-                    echo "OPENAI_API_KEY=${OPENAI_KEY}"
-                    echo "OPENAI_MODEL=${OPENAI_MODEL_VAL:-gpt-4o-mini}"
-                fi
-                if [[ -n "${ANTHROPIC_KEY:-}" ]]; then
-                    echo "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
-                    echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL_VAL:-claude-haiku-4-5-20251001}"
-                fi
-                if [[ -n "${GOOGLE_KEY:-}" ]]; then
-                    echo "GOOGLE_AI_API_KEY=${GOOGLE_KEY}"
-                    echo "GOOGLE_AI_MODEL=${GOOGLE_MODEL_VAL:-gemini-2.0-flash}"
-                fi
-                # Set LLM_PROVIDER to the first configured cloud provider so the backend
-                # doesn't fall back to the local Ollama default when cloud keys are present.
-                if [[ -n "${OPENAI_KEY:-}" ]]; then
-                    echo "LLM_PROVIDER=openai"
-                elif [[ -n "${ANTHROPIC_KEY:-}" ]]; then
-                    echo "LLM_PROVIDER=anthropic"
-                elif [[ -n "${GOOGLE_KEY:-}" ]]; then
-                    echo "LLM_PROVIDER=google"
-                fi
-            } >> "$ENV_FILE"
-            ENABLE_AI=cloud
-            success "Cloud AI configured: ${CONFIGURED_PROVIDERS[*]}"
-        fi
-        ;;
-    *)
-        info "Skipping AI features."
-        info "To enable later: add AI vars to .env, or run:  ${COMPOSE_CMD} --profile ollama up -d"
-        ;;
-esac
+info "Running: ${COMPOSE_CMD} up -d --build"
+info "On the first run this can take 5–10 minutes (downloading images and compiling). Please wait..."
 echo ""
 
 # ── 4. Build and start ────────────────────────────────────────────────────────
@@ -481,7 +492,7 @@ if ! command -v curl &>/dev/null; then
 fi
 
 HEALTH_URL="http://localhost:5173/api/health"
-MAX_WAIT=90
+MAX_WAIT=180
 INTERVAL=5
 elapsed=0
 
@@ -515,7 +526,7 @@ bold "============================================================"
 echo ""
 
 # Read FRONTEND_URL from .env for display (covers the case where we skipped config)
-DISPLAY_URL=$(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "http://localhost:5173")
+DISPLAY_URL=$(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "http://localhost:5173")
 
 echo -e "  ${GREEN}App URL:${RESET}        ${BOLD}${DISPLAY_URL}${RESET}"
 echo -e "  ${GREEN}API health:${RESET}     ${BOLD}${DISPLAY_URL}/api/health${RESET}"

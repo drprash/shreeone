@@ -1,6 +1,6 @@
 # ShreeOne — Family Finance
 
-A private, shared money system for families - with control over what you share and what you don’t.
+A private, shared money system for families - with control over what you share and what you don't.
 
 ---
 
@@ -21,7 +21,7 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 | Need | How ShreeOne solves it |
 |---|---|
 | Shared family view | All members see a unified dashboard across all accounts |
-| Role-based privacy | Three privacy levels — Private, Shared (couple), Family — per transaction |
+| Role-based privacy | Three privacy levels — Private, Shared (couple), Family — configured per family |
 | Recurring payments | Auto-processed daily; bills appear in the ledger without manual entry |
 | Offline use | Full PWA with a service worker; transactions queue locally and sync when connectivity returns |
 | Install on Android | "Add to Home Screen" from Chrome — launches like a native app |
@@ -31,36 +31,21 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 
 ![ShreeOne](/media/shreeone_home.png)
 
----
-
 ## Features
 
-- **Multi-account tracking** — bank accounts, credit cards, wallets, savings across multiple countries and currencies
+- **Multi-account tracking** — bank accounts, credit cards, cash wallets, investment portfolios
+- **Multi-currency support** — per-transaction currency override with automatic exchange rates (ECB + FloatRates, updated daily); manual rate override available
 - **Income & expense categorisation** with custom categories per family
 - **Financial Goals** — savings targets, big purchases, debt payoff, net-worth milestones; manual contributions with history or auto-tracked via a linked account
 - **Budget settings** — monthly limits per category with alerts
 - **Recurring payments** — subscriptions, EMIs, SIPs auto-posted at midnight daily
-- **Net Worth timeline** — daily snapshots charted on the Dashboard
-- **Role-based access** — Admin, Member, Viewer with granular permission overrides
-- **Transaction privacy** — Private / Shared / Family visibility per entry
+- **Role-based access** — Admin and Member roles with granular per-member permission overrides
+- **Family privacy levels** — Private / Shared / Family visibility, configured per family
+- **Country-based net worth** — accounts tagged by country with a breakdown widget on the dashboard
+- **Member spending breakdown** — per-member expense summary on the dashboard
 - **Passkey / WebAuthn** — passwordless login alongside JWT
 - **Offline-first PWA** — IndexedDB queue, auto-sync on reconnect; installable on Android
-- **Backup & Restore** — HMAC-signed JSON export/import covering all data including goals and AI preferences
-
-### AI features (optional)
-
-Supports a local Ollama model (no data leaves your server) or cloud providers (OpenAI, Anthropic, Google). The app works fully without any AI configured.
-
-| Feature | Description |
-|---|---|
-| **Auto-categorisation** | Suggests a category for each transaction as you type |
-| **Voice / Smart Entry** | Speak or type a sentence ("spent £45 at Tesco") — fields auto-fill |
-| **Receipt OCR** | Photograph a receipt; amount, merchant, date extracted automatically |
-| **Bank Statement Import** | Upload a PDF or image statement; expense rows parsed into transactions |
-| **Monthly Narrative** | 3–4 sentence plain-English summary of the family's monthly finances |
-| **Weekly Digest** | 2-sentence spending summary shown on the Dashboard |
-
-AI is controlled via a **master on/off switch** in **Settings → AI Features**. Turning it on triggers a live connection test against all API keys configured in `.env`; the best responding provider is selected automatically. Individual features (categorisation, narratives, receipt OCR, etc.) can be toggled separately once AI is enabled.
+- **Backup & restore** — one-command export/import via the admin panel or `scripts/backup.sh`
 
 ## Tech Stack
 
@@ -223,25 +208,16 @@ gunzip -c backups/shreeone_backup_YYYYMMDD_HHMMSS.sql.gz \
 shreeone/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py             # FastAPI app, scheduler, CORS, DB migrations
-│   │   ├── models.py           # SQLAlchemy models
-│   │   ├── schemas.py          # Pydantic request/response schemas
+│   │   ├── main.py                 # FastAPI app, scheduler, CORS
+│   │   ├── models.py               # SQLAlchemy models (16 tables)
+│   │   ├── schemas.py              # Pydantic request/response schemas
 │   │   ├── crud.py
-│   │   ├── auth.py             # JWT + WebAuthn
-│   │   ├── financial_logic.py  # Balance calculations, exchange rate engine
+│   │   ├── auth.py                 # JWT + WebAuthn
+│   │   ├── financial_logic.py      # Balance calculation, transaction processing
+│   │   ├── exchange_rate_service.py# ECB + FloatRates exchange rate fetching
+│   │   ├── recurring_processor.py  # Recurring payment auto-posting
 │   │   ├── config.py
-│   │   └── routers/
-│   │       ├── ai.py           # AI endpoints (categorise, receipt, voice, statement, narrative)
-│   │       ├── goals.py        # Financial goals + contributions
-│   │       ├── accounts.py
-│   │       ├── transactions.py
-│   │       ├── categories.py
-│   │       ├── dashboard.py
-│   │       ├── settings.py
-│   │       ├── backup.py       # Backup & restore
-│   │       └── ...
-│   ├── services/
-│   │   └── ai_service.py       # Ollama HTTP client (categorise, OCR, voice, narrative)
+│   │   └── routers/                # auth, accounts, transactions, categories, dashboard, settings, sync, admin, backup
 │   ├── tests/
 │   ├── requirements.txt
 │   └── Dockerfile
@@ -255,23 +231,16 @@ shreeone/
 │   │   │   ├── Settings.jsx
 │   │   │   └── ...
 │   │   ├── components/
-│   │   │   ├── Dashboard/NetWorthChart.jsx
-│   │   │   ├── Transactions/QuickAdd.jsx   # voice / smart-entry
-│   │   │   └── Settings/
-│   │   ├── services/
-│   │   │   ├── aiAPI.js        # AI feature calls
-│   │   │   ├── goalsAPI.js
-│   │   │   └── ...
-│   │   ├── store/              # Zustand (auth, theme)
-│   │   └── lib/               # IndexedDB offline queue
+│   │   ├── services/               # Axios API client, WebAuthn
+│   │   ├── store/                  # Zustand (auth, theme)
+│   │   └── lib/                    # IndexedDB offline queue
 │   ├── public/
 │   ├── nginx.conf
 │   ├── package.json
 │   └── Dockerfile
-├── scripts/
-│   └── backup.sh
-├── docker-compose.yml          # Full stack; use --profile ollama to add local AI
-├── install.sh                  # automated one-step installer
+├── scripts/backup.sh
+├── docker-compose.yml
+├── install.sh                      # automated one-step installer
 └── .env.example
 ```
 

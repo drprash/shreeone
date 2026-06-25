@@ -158,12 +158,38 @@ check_or_install_docker() {
     os=$(uname -s)
     case "$os" in
         Linux)   install_docker_linux ;;
-        Darwin)  die "On macOS, install Docker Desktop from https://docs.docker.com/desktop/mac/ and re-run this script." ;;
+        Darwin)
+            if [[ -d "/Applications/Docker.app" ]]; then
+                warn "Docker Desktop is installed but not running."
+                info "Starting Docker Desktop..."
+                open -a Docker
+                info "Wait for Docker to fully start (watch the menu-bar whale icon), then re-run this script."
+                exit 0
+            elif command -v brew &>/dev/null; then
+                info "Installing Docker Desktop via Homebrew..."
+                brew install --cask docker
+                info "Open Docker from your Applications folder, wait for it to start, then re-run this script."
+                exit 0
+            else
+                die "Install Docker Desktop from https://docs.docker.com/desktop/mac/ then re-run this script."
+            fi
+            ;;
         *)       die "Unsupported OS '${os}'. Install Docker manually: https://docs.docker.com/get-docker/" ;;
     esac
 }
 
 check_or_install_docker
+
+# Guard: after a fresh Docker install the current session lacks the new docker group membership.
+if ! docker info &>/dev/null 2>&1; then
+    warn "Docker is installed but unreachable in this session."
+    info "This is normal after a first-time install — the docker group change needs a new login."
+    echo ""
+    info "Log out and back in, then re-run this script from the ShreeOne directory:"
+    echo "    bash install.sh"
+    echo ""
+    exit 0
+fi
 
 # Verify Docker Compose (v2 plugin or standalone)
 COMPOSE_CMD=""
@@ -340,8 +366,8 @@ read -r -p "$(echo -e "${BOLD}  Choose AI option [1/2/3]:${RESET} ")" ai_choice
 case "${ai_choice:-3}" in
     1)
         ENABLE_AI=ollama
-        info "Local Ollama selected. Ollama will pull gemma4:e4b automatically on first start."
-        info "First start may take several minutes while the ~4.7 GB model downloads."
+        warn "  Hardware requirements: approximately 8 GB RAM and 6 GB free disk space."
+        info "  gemma4:e4b (~4.7 GB) will be downloaded on first start — this may take several minutes."
         ;;
     2)
         echo ""
@@ -396,6 +422,15 @@ case "${ai_choice:-3}" in
                     echo "GOOGLE_AI_API_KEY=${GOOGLE_KEY}"
                     echo "GOOGLE_AI_MODEL=${GOOGLE_MODEL_VAL:-gemini-2.0-flash}"
                 fi
+                # Set LLM_PROVIDER to the first configured cloud provider so the backend
+                # doesn't fall back to the local Ollama default when cloud keys are present.
+                if [[ -n "${OPENAI_KEY:-}" ]]; then
+                    echo "LLM_PROVIDER=openai"
+                elif [[ -n "${ANTHROPIC_KEY:-}" ]]; then
+                    echo "LLM_PROVIDER=anthropic"
+                elif [[ -n "${GOOGLE_KEY:-}" ]]; then
+                    echo "LLM_PROVIDER=google"
+                fi
             } >> "$ENV_FILE"
             ENABLE_AI=cloud
             success "Cloud AI configured: ${CONFIGURED_PROVIDERS[*]}"
@@ -413,6 +448,13 @@ bold "── Step 4: Build & Start Services ────────────
 
 cd "$SCRIPT_DIR"
 
+# Pre-flight: check if port 5173 is already bound by another process
+if ss -tlnp 2>/dev/null | grep -q ':5173 '; then
+    warn "Port 5173 is already in use by another process."
+    warn "Either stop that process first, or edit the 'ports' mapping in docker-compose.yml."
+    confirm "Continue anyway?" N || exit 0
+fi
+
 if [[ "$ENABLE_AI" == "ollama" ]]; then
     info "Starting full stack with local AI (Ollama + Gemma 4 E4B)..."
     info "Running: ${COMPOSE_CMD} --profile ollama up -d --build"
@@ -429,27 +471,40 @@ echo ""
 # ── 5. Health check ───────────────────────────────────────────────────────────
 bold "── Step 5: Health Check ─────────────────────────────────────"
 
+SKIP_HEALTH=false
+if ! command -v curl &>/dev/null; then
+    info "curl not found — installing..."
+    sudo apt-get install -y -qq curl 2>/dev/null || \
+        sudo dnf -y install curl 2>/dev/null || \
+        sudo pacman -Sy --noconfirm curl 2>/dev/null || \
+        { warn "Could not install curl automatically. Skipping health check."; SKIP_HEALTH=true; }
+fi
+
 HEALTH_URL="http://localhost:5173/api/health"
 MAX_WAIT=90
 INTERVAL=5
 elapsed=0
 
-info "Waiting for the API to become healthy (up to ${MAX_WAIT}s)..."
-until curl -fsS "$HEALTH_URL" &>/dev/null; do
-    if (( elapsed >= MAX_WAIT )); then
-        warn "Health check timed out after ${MAX_WAIT}s."
-        warn "Services may still be starting. Check logs with:"
-        echo "    ${COMPOSE_CMD} logs -f"
-        break
-    fi
-    echo -n "."
-    sleep "$INTERVAL"
-    elapsed=$(( elapsed + INTERVAL ))
-done
+if [[ "$SKIP_HEALTH" == "false" ]]; then
+    info "Waiting for the API to become healthy (up to ${MAX_WAIT}s)..."
+    until curl -fsS "$HEALTH_URL" &>/dev/null; do
+        if (( elapsed >= MAX_WAIT )); then
+            warn "Health check timed out after ${MAX_WAIT}s."
+            warn "Services may still be starting. Check logs with:"
+            echo "    ${COMPOSE_CMD} logs -f"
+            break
+        fi
+        echo -n "."
+        sleep "$INTERVAL"
+        elapsed=$(( elapsed + INTERVAL ))
+    done
 
-if curl -fsS "$HEALTH_URL" &>/dev/null; then
-    echo ""
-    success "API is healthy!"
+    if curl -fsS "$HEALTH_URL" &>/dev/null; then
+        echo ""
+        success "API is healthy!"
+    fi
+else
+    info "Skipping health check (curl unavailable)."
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────

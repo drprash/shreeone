@@ -11,8 +11,7 @@
 .idea/
 .vscode/
 .claude/
-.DS_Store
-Thumbs.db
+.codegraph/
 *.swp
 *.swo
 *~
@@ -101,8 +100,5 @@ ehthumbs.db
 Thumbs.db
 
 # Runtime and generated data
-docker-compose.test.yml
-scripts/run-container-tests.sh
-SHREEONE_PROJECT_PLAN.md
 CLAUDE.md
 docs/

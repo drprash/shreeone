@@ -59,6 +59,7 @@ services:
       - shreeone-network
     depends_on:
       - backend
+    restart: unless-stopped
 
   llm:
     image: ollama/ollama

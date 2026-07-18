@@ -283,13 +283,23 @@ const QuickAdd = ({ accounts, categories, baseCurrency, defaultAccountId = '', o
   ) || [];
 
   return (
-    <div className="card-hover bg-white dark:bg-slate-800 rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:border-slate-700 mb-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+    <div className="card-hover relative bg-white dark:bg-slate-800 rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:border-slate-700 mb-6">
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"
+          title="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pr-8">
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <Plus className="w-5 h-5" />
-          Quick Add Transaction
+          Add Transaction
         </h3>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setIsTransfer(false)}
@@ -305,16 +315,6 @@ const QuickAdd = ({ accounts, categories, baseCurrency, defaultAccountId = '', o
             <ArrowRightLeft className="w-4 h-4" />
             Transfer
           </button>
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"
-              title="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
         </div>
       </div>
 

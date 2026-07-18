@@ -124,23 +124,15 @@ const Dashboard = () => {
         <SummaryCards data={summaryData} />
       )}
 
-      <div className="space-y-6 mb-6">
-        {dashboardData?.category_breakdown && (
-          <React.Suspense fallback={<div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:bg-slate-800 dark:border-slate-700 h-[348px]" />}>
-            <CategoryChart
-              data={dashboardData.category_breakdown}
-              baseCurrency={dashboardData?.summary?.base_currency}
-            />
-          </React.Suspense>
-        )}
-        {showMemberSpending && dashboardData?.member_spending && privacyLevel !== 'PRIVATE' && (
-          <React.Suspense fallback={<div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:bg-slate-800 dark:border-slate-700 h-[348px]" />}>
-            <MemberSpending
-              data={dashboardData.member_spending}
-              baseCurrency={dashboardData?.summary?.base_currency}
-            />
-          </React.Suspense>
-        )}
+      {/* Net Worth Timeline */}
+      <div className="mb-6">
+        <React.Suspense fallback={<div className="h-48 bg-white dark:bg-slate-800 rounded-xl animate-pulse" />}>
+          <NetWorthChart
+            baseCurrency={dashboardData?.summary?.base_currency}
+            selectedMemberId={selectedMemberId}
+            currentNetWorth={summaryData?.total_net_worth}
+          />
+        </React.Suspense>
       </div>
 
       {/* Country & Currency Breakdown */}
@@ -152,15 +144,23 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Net Worth Timeline */}
-      <div className="mb-6">
-        <React.Suspense fallback={<div className="h-48 bg-white dark:bg-slate-800 rounded-xl animate-pulse" />}>
-          <NetWorthChart
-            baseCurrency={dashboardData?.summary?.base_currency}
-            selectedMemberId={selectedMemberId}
-            currentNetWorth={summaryData?.total_net_worth}
-          />
-        </React.Suspense>
+      <div className="space-y-6 mb-6">
+        {showMemberSpending && dashboardData?.member_spending && privacyLevel !== 'PRIVATE' && (
+          <React.Suspense fallback={<div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:bg-slate-800 dark:border-slate-700 h-[348px]" />}>
+            <MemberSpending
+              data={dashboardData.member_spending}
+              baseCurrency={dashboardData?.summary?.base_currency}
+            />
+          </React.Suspense>
+        )}
+        {dashboardData?.category_breakdown && (
+          <React.Suspense fallback={<div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:bg-slate-800 dark:border-slate-700 h-[348px]" />}>
+            <CategoryChart
+              data={dashboardData.category_breakdown}
+              baseCurrency={dashboardData?.summary?.base_currency}
+            />
+          </React.Suspense>
+        )}
       </div>
 
       {dashboardData?.recent_transactions && (

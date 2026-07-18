@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { Plus, X, Clock, Pencil, Trash2, Camera, Sparkles, Upload, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, Clock, Pencil, Trash2, Camera, Sparkles, Upload, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useAIStatus } from '../hooks/useAIStatus';
 import { categorizeTransaction, parseReceipt, parseStatement, bulkCreateTransactions } from '../services/aiAPI';
 import { formatAccountDisplayName, formatCurrency, formatDate, getCurrencySymbol } from '../utils/formatters';
@@ -12,7 +12,7 @@ import { queryKeys } from '../utils/queryKeys';
 import { getTransactionIcon, getTransactionAmountColor } from '../utils/typeHelpers';
 import LoadingSpinner from '../components/LoadingSpinner';
 import toast from 'react-hot-toast';
-import { useCreateTransaction } from '../hooks/useCreateTransaction';
+import FloatingAddTransactionButton from '../components/Transactions/FloatingAddTransactionButton';
 import { useUpdateTransaction, useDeleteTransaction } from '../hooks/useTransactionMutations';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 
@@ -214,9 +214,6 @@ const Transactions = () => {
     }
   };
 
-  const { mutate: createTransaction, isPending: createPending } = useCreateTransaction({
-    onSuccess: () => { setShowModal(false); resetForm(); setAiSuggestion(null); },
-  });
   const { mutate: updateTransaction, isPending: updatePending } = useUpdateTransaction({
     onSuccess: () => { setShowModal(false); resetForm(); },
   });
@@ -300,14 +297,8 @@ const Transactions = () => {
       }
     }
     
-    if (editingId) {
-      // Update existing transaction (offline-aware)
-      updateTransaction({ id: editingId, data: payload });
-      setEditingId(null);
-    } else {
-      // Create new transaction (offline-aware)
-      createTransaction(payload);
-    }
+    // Update existing transaction (offline-aware) — this modal only ever opens in edit mode now
+    updateTransaction({ id: editingId, data: payload });
   };
 
   // Check if categories exist
@@ -382,13 +373,6 @@ const Transactions = () => {
               Upload Statement
             </button>
           )}
-          <button
-            onClick={() => setShowModal(true)}
-            className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700"
-          >
-            <Plus className="w-5 h-5" />
-            Add Transaction
-          </button>
         </div>
       </div>
 
@@ -687,7 +671,7 @@ const Transactions = () => {
         <div className="modal-backdrop fixed inset-0 flex items-start sm:items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
           <div className="glass-panel bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md mx-3 sm:mx-4 p-4 sm:p-6 max-h-[92vh] overflow-y-auto slide-in">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">{editingId ? 'Edit Transaction' : 'Add Transaction'}</h2>
+              <h2 className="text-xl font-semibold">Edit Transaction</h2>
               <button 
                 onClick={() => {
                   setShowModal(false);
@@ -1021,16 +1005,12 @@ const Transactions = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={(createPending || updatePending) ||
+                  disabled={updatePending ||
                            (formData.type !== 'TRANSFER' && !formData.category_id) ||
                            (formData.type === 'TRANSFER' && !formData.target_account_id)}
                   className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {editingId ? (
-                    updatePending ? 'Updating...' : 'Update Transaction'
-                  ) : (
-                    createPending ? 'Adding...' : 'Add Transaction'
-                  )}
+                  {updatePending ? 'Updating...' : 'Update Transaction'}
                 </button>
               </div>
             </form>
@@ -1246,6 +1226,7 @@ const Transactions = () => {
           </div>
         </div>
       )}
+      <FloatingAddTransactionButton accounts={accounts} categories={categories} baseCurrency={familySettings?.base_currency} />
     </div>
   );
 };

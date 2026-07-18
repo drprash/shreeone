@@ -11,6 +11,7 @@ import { getAccountIcon, getAccountColor, getCountryDisplay } from '../utils/typ
 import LoadingSpinner from '../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import { useCreateAccount, useUpdateAccount, useDeleteAccount } from '../hooks/useAccountMutations';
+import FloatingAddTransactionButton from '../components/Transactions/FloatingAddTransactionButton';
 
 const ACCOUNT_GROUPS = [
   { type: 'BANK', label: 'Bank Accounts' },
@@ -75,6 +76,11 @@ const Accounts = () => {
   const { data: accounts, isLoading } = useQuery({
     queryKey: queryKeys.accounts(),
     queryFn: () => api.get('/accounts/').then(res => res.data)
+  });
+
+  const { data: categories } = useQuery({
+    queryKey: queryKeys.categories(),
+    queryFn: () => api.get('/categories/').then(res => res.data)
   });
 
   const { data: familyProfile, isLoading: profileLoading } = useQuery({
@@ -768,6 +774,7 @@ const Accounts = () => {
           </div>
         </div>
       )}
+      <FloatingAddTransactionButton accounts={accounts} categories={categories} baseCurrency={baseCurrency} />
     </div>
   );
 };

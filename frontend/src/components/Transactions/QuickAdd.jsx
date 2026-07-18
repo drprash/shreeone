@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, ArrowRightLeft, Camera, Mic, MicOff, Sparkles } from 'lucide-react';
+import { Plus, ArrowRightLeft, Camera, Mic, MicOff, Sparkles, X } from 'lucide-react';
 import { formatDateForInput, parseDateForPicker, toNaiveDateTimeString } from '../../utils/dateUtils';
 import { formatAccountDisplayName, formatCurrency } from '../../utils/formatters';
 import toast from 'react-hot-toast';
@@ -17,7 +17,7 @@ function getQAConversionRate(from, to) {
   return t === 0 ? 1.0 : parseFloat((f / t).toFixed(6));
 }
 
-const QuickAdd = ({ accounts, categories, baseCurrency }) => {
+const QuickAdd = ({ accounts, categories, baseCurrency, defaultAccountId = '', onSuccess, onClose }) => {
   const [isTransfer, setIsTransfer] = useState(false);
   const aiStatus = useAIStatus();
   const aiAvailable = aiStatus.ai_services_enabled;
@@ -73,6 +73,13 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
   if (!categories || categories.length === 0) {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        {onClose && (
+          <div className="flex justify-end mb-2">
+            <button type="button" onClick={onClose} className="text-amber-700 hover:text-amber-900">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        )}
         <p className="text-amber-800 text-sm">
           ⚠️ <a href="/categories" className="underline font-medium">Create categories</a> first to add transactions
         </p>
@@ -86,7 +93,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
       amount: '',
       description: '',
       transaction_date: new Date(),
-      account_id: '',
+      account_id: defaultAccountId,
       category_id: '',
       target_account_id: '',
       transfer_conversion_rate: '1.00',
@@ -212,7 +219,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
     recognition.start();
   };
 
-  const { mutate: createTransaction, isPending } = useCreateTransaction({ onSuccess: () => { reset(); setAiSuggestion(null); } });
+  const { mutate: createTransaction, isPending } = useCreateTransaction({ onSuccess: () => { reset(); setAiSuggestion(null); onSuccess?.(); } });
 
   const onSubmit = (data) => {
     // Validate form data before submission
@@ -282,7 +289,7 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
           <Plus className="w-5 h-5" />
           Quick Add Transaction
         </h3>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setIsTransfer(false)}
@@ -298,6 +305,16 @@ const QuickAdd = ({ accounts, categories, baseCurrency }) => {
             <ArrowRightLeft className="w-4 h-4" />
             Transfer
           </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"
+              title="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
 

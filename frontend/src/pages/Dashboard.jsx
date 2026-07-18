@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../services/api';
 import SummaryCards from '../components/Dashboard/SummaryCards';
 import RecentTransactions from '../components/Dashboard/RecentTransactions';
-import QuickAdd from '../components/Transactions/QuickAdd';
+import FloatingAddTransactionButton from '../components/Transactions/FloatingAddTransactionButton';
 import { useAuthStore } from '../store/authStore';
 import { queryKeys } from '../utils/queryKeys';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -98,7 +98,7 @@ const Dashboard = () => {
         <NarrativeBanner />
       </React.Suspense>
 
-      <QuickAdd accounts={accounts} categories={categories} baseCurrency={dashboardData?.summary?.base_currency} />
+      <FloatingAddTransactionButton accounts={accounts} categories={categories} baseCurrency={dashboardData?.summary?.base_currency} />
 
       {/* Admin-only summary filter */}
       {isAdmin && memberList.length > 0 && (
@@ -124,7 +124,7 @@ const Dashboard = () => {
         <SummaryCards data={summaryData} />
       )}
 
-      <div className={`grid grid-cols-1 ${showMemberSpending ? 'lg:grid-cols-2' : ''} gap-6 mb-6`}>
+      <div className="space-y-6 mb-6">
         {dashboardData?.category_breakdown && (
           <React.Suspense fallback={<div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100 dark:bg-slate-800 dark:border-slate-700 h-[348px]" />}>
             <CategoryChart

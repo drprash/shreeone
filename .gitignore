@@ -102,3 +102,7 @@ Thumbs.db
 # Runtime and generated data
 CLAUDE.md
 docs/
+
+# Superpowers scratch state (subagent-driven-development progress ledger)
+.superpowers/
+.worktrees/

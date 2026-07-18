@@ -1,24 +1,21 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import {
   ArrowLeft,
-  Plus,
   ArrowRightLeft,
   TrendingUp,
   TrendingDown,
-  X,
-  Sparkles
+  X
 } from 'lucide-react';
 import { formatAccountDisplayName, formatCurrency, formatDate } from '../utils/formatters';
 import { getCountryDisplay } from '../utils/typeHelpers';
-import { useAIStatus } from '../hooks/useAIStatus';
-import { categorizeTransaction } from '../services/aiAPI';
 import { toNaiveDateTimeString, toNaiveLocalDateTimeString, formatDateForInput, parseDateForPicker } from '../utils/dateUtils';
 import { queryKeys } from '../utils/queryKeys';
 import LoadingSpinner from '../components/LoadingSpinner';
+import FloatingAddTransactionButton from '../components/Transactions/FloatingAddTransactionButton';
 import toast from 'react-hot-toast';
 
 const BalanceHistoryChart = React.lazy(() => import('../components/Accounts/BalanceHistoryChart'));
@@ -29,36 +26,8 @@ const AccountDetail = () => {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const [showTransferModal, setShowTransferModal] = useState(false);
-  const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [dateFilter, setDateFilter] = useState('all'); // all, month, quarter, year
   const [typeFilter, setTypeFilter] = useState('all'); // all, INCOME, EXPENSE, TRANSFER
-  const [transactionForm, setTransactionForm] = useState({
-    type: 'EXPENSE',
-    amount: '',
-    description: '',
-    category_id: '',
-    transaction_date: new Date(),
-    tx_currency: '',
-    exchange_rate_to_base: '',
-  });
-  const [aiSuggestion, setAiSuggestion] = useState(null);
-  const categorizationTimer = useRef(null);
-  const aiStatus = useAIStatus();
-  const aiAvailable = aiStatus.ai_services_enabled;
-
-  const handleDescriptionChange = useCallback((description) => {
-    setAiSuggestion(null);
-    clearTimeout(categorizationTimer.current);
-    if (!aiAvailable || !aiStatus.ai_categorization_enabled || description.length < 3) return;
-    categorizationTimer.current = setTimeout(async () => {
-      try {
-        const result = await categorizeTransaction(description);
-        if (result?.category_id) setAiSuggestion(result);
-      } catch { /* silent — AI is optional */ }
-    }, 1000);
-  }, [aiAvailable, aiStatus.ai_categorization_enabled]);
-
-  useEffect(() => () => clearTimeout(categorizationTimer.current), []);
 
   // Fetch account details
   const { data: account, isLoading: accountLoading } = useQuery({
@@ -86,63 +55,16 @@ const AccountDetail = () => {
     }
   });
 
-  // Fetch categories for transaction form
+  // Fetch categories for the floating Add Transaction button
   const { data: categories } = useQuery({
     queryKey: queryKeys.categories(),
-    queryFn: () => api.get('/categories/').then(res => res.data),
-    enabled: showTransactionModal
+    queryFn: () => api.get('/categories/').then(res => res.data)
   });
 
-  // Fetch all accounts for transfer
+  // Fetch all accounts — used by both the Transfer modal and the floating Add Transaction button
   const { data: allAccounts } = useQuery({
     queryKey: queryKeys.accounts(),
-    queryFn: () => api.get('/accounts/').then(res => res.data),
-    enabled: showTransferModal
-  });
-
-  const { data: txFamilyProfile } = useQuery({
-    queryKey: ['settings', 'family-profile'],
-    queryFn: () => api.get('/settings/family-profile').then(r => r.data),
-    staleTime: 1000 * 60 * 5,
-    enabled: showTransactionModal,
-  });
-
-  const { data: txSecondaryCurrencies = [] } = useQuery({
-    queryKey: ['settings', 'currencies'],
-    queryFn: () => api.get('/settings/currencies').then(r => r.data),
-    staleTime: 1000 * 60 * 5,
-    enabled: showTransactionModal,
-  });
-
-  const { data: txStoredRates = [] } = useQuery({
-    queryKey: ['settings', 'exchange-rates'],
-    queryFn: () => api.get('/settings/exchange-rates').then(r => r.data),
-    staleTime: 1000 * 60 * 5,
-    enabled: showTransactionModal,
-  });
-
-  // Create transaction mutation
-  const createTransactionMutation = useMutation({
-    mutationFn: (data) => api.post('/transactions/', data),
-    onSuccess: () => {
-      toast.success('Transaction created');
-      queryClient.invalidateQueries({ queryKey: queryKeys.transactionsByAccountAll(accountId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.account(accountId) });
-      setShowTransactionModal(false);
-      setAiSuggestion(null);
-      setTransactionForm({
-        type: 'EXPENSE',
-        amount: '',
-        description: '',
-        category_id: '',
-        transaction_date: new Date(),
-        tx_currency: '',
-        exchange_rate_to_base: '',
-      });
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.detail || 'Failed to create transaction');
-    }
+    queryFn: () => api.get('/accounts/').then(res => res.data)
   });
 
   // Calculate transactions with running balance
@@ -222,25 +144,6 @@ const AccountDetail = () => {
     }, { income: 0, expense: 0, transfers: 0 });
   }, [transactions, account]);
 
-  const txResolvedBase = txFamilyProfile?.base_currency;
-  const lookupTxStoredRate = (currency) => {
-    if (!currency || !txResolvedBase) return null;
-    if (currency === txResolvedBase) return { rate: '1.000000', date: null };
-    const row = txStoredRates.find(r => r.from_currency === currency && r.to_currency === txResolvedBase);
-    if (row) return { rate: parseFloat(row.rate).toFixed(6), date: row.valid_date };
-    const approx = getDefaultConversionRate(currency, txResolvedBase);
-    return approx !== 1.0 ? { rate: String(approx), date: null } : null;
-  };
-  const txCurrencyOptions = txResolvedBase
-    ? [
-        { code: txResolvedBase, label: `${txResolvedBase} (Primary)` },
-        ...txSecondaryCurrencies.map(c => ({ code: c.currency_code, label: c.currency_code })),
-      ]
-    : txSecondaryCurrencies.map(c => ({ code: c.currency_code, label: c.currency_code }));
-  const effectiveTxCurrency = transactionForm.tx_currency || account?.currency;
-  const showTxExchangeRateField = effectiveTxCurrency && account?.currency &&
-    effectiveTxCurrency !== account?.currency;
-
   if (accountLoading) {
     return <LoadingSpinner />;
   }
@@ -286,14 +189,6 @@ const AccountDetail = () => {
           >
             <ArrowRightLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             <span className="hidden xs:inline">Transfer</span>
-          </button>
-          <button
-            onClick={() => setShowTransactionModal(true)}
-            className="bg-blue-600 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg flex items-center gap-2 hover:bg-blue-700 text-sm sm:text-base"
-          >
-            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="hidden xs:inline">Add</span>
-            <span className="hidden sm:inline"> Transaction</span>
           </button>
         </div>
       </div>
@@ -482,231 +377,6 @@ const AccountDetail = () => {
         )}
       </div>
 
-      {/* Transaction Modal */}
-      {showTransactionModal && (
-        <div className="modal-backdrop fixed inset-0 flex items-start sm:items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
-          <div className="glass-panel bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md mx-3 sm:mx-4 max-h-[92vh] overflow-y-auto slide-in">
-            <div className="flex items-center justify-between p-4 sm:p-6 border-b">
-              <h2 className="text-xl font-semibold">Add Transaction</h2>
-              <button 
-                onClick={() => setShowTransactionModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              if (!transactionForm.amount) {
-                toast.error('Please enter an amount');
-                return;
-              }
-              if (transactionForm.type !== 'TRANSFER' && !transactionForm.category_id) {
-                toast.error('Please select a category');
-                return;
-              }
-              const payload = {
-                type: transactionForm.type,
-                amount: parseFloat(transactionForm.amount),
-                currency: transactionForm.tx_currency || account.currency,
-                description: transactionForm.description || '',
-                transaction_date: toNaiveDateTimeString(transactionForm.transaction_date),
-                account_id: accountId
-              };
-              if (transactionForm.exchange_rate_to_base && parseFloat(transactionForm.exchange_rate_to_base) > 0) {
-                payload.exchange_rate_to_base = parseFloat(transactionForm.exchange_rate_to_base);
-              }
-              if (transactionForm.type !== 'TRANSFER' && transactionForm.category_id) {
-                payload.category_id = transactionForm.category_id;
-              }
-              createTransactionMutation.mutate(payload);
-            }} className="p-4 sm:p-6 space-y-4">
-              {/* Type Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      value="EXPENSE"
-                      checked={transactionForm.type === 'EXPENSE'}
-                      onChange={(e) => { setTransactionForm({...transactionForm, type: e.target.value, category_id: ''}); setAiSuggestion(null); }}
-                      className="mr-2"
-                    />
-                    <span className="text-red-600">
-                      {account.account_class === 'LIABILITY' ? 'Charge / Spend' : 'Expense'}
-                    </span>
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      value="INCOME"
-                      checked={transactionForm.type === 'INCOME'}
-                      onChange={(e) => { setTransactionForm({...transactionForm, type: e.target.value, category_id: ''}); setAiSuggestion(null); }}
-                      className="mr-2"
-                    />
-                    <span className="text-green-600">
-                      {account.account_class === 'LIABILITY' ? 'Payment / Refund' : 'Income'}
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Category */}
-              {transactionForm.type !== 'TRANSFER' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-                  {aiSuggestion && (
-                    <div className="flex items-center gap-2 mb-1.5 px-2 py-1 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-700">
-                      <Sparkles className="w-3 h-3 shrink-0" />
-                      <span>AI suggests: <strong>{aiSuggestion.category}</strong></span>
-                      <button
-                        type="button"
-                        onClick={() => { setTransactionForm(f => ({...f, category_id: aiSuggestion.category_id})); setAiSuggestion(null); }}
-                        className="ml-auto px-2 py-0.5 bg-violet-600 text-white rounded text-xs hover:bg-violet-700"
-                      >
-                        Accept
-                      </button>
-                      <button type="button" onClick={() => setAiSuggestion(null)} className="text-violet-400 hover:text-violet-600">✕</button>
-                    </div>
-                  )}
-                  <select
-                    value={transactionForm.category_id}
-                    onChange={(e) => setTransactionForm({...transactionForm, category_id: e.target.value})}
-                    required
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select a category...</option>
-                    {categories?.filter(c => c.type === transactionForm.type).map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Currency override — shown when family has secondary currencies */}
-              {txCurrencyOptions.length > 1 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Transaction Currency
-                    <span className="ml-1 text-xs font-normal text-gray-400">(optional override)</span>
-                  </label>
-                  <select
-                    value={transactionForm.tx_currency}
-                    onChange={(e) => {
-                      const selected = e.target.value;
-                      const looked = lookupTxStoredRate(selected);
-                      setTransactionForm({...transactionForm, tx_currency: selected, exchange_rate_to_base: looked ? looked.rate : ''});
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Account currency ({account?.currency || '—'})</option>
-                    {txCurrencyOptions
-                      .filter(c => c.code !== account?.currency)
-                      .map(c => (
-                        <option key={c.code} value={c.code}>{c.label}</option>
-                      ))
-                    }
-                  </select>
-                </div>
-              )}
-
-              {/* Exchange rate — shown when transaction currency ≠ account currency */}
-              {showTxExchangeRateField && (() => {
-                const rateInfo = lookupTxStoredRate(effectiveTxCurrency);
-                return (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Exchange Rate to {txResolvedBase}
-                      {rateInfo?.date && (
-                        <span className="ml-1 text-xs font-normal text-gray-400">ECB rate as of {rateInfo.date}</span>
-                      )}
-                      {!rateInfo?.date && rateInfo && (
-                        <span className="ml-1 text-xs font-normal text-gray-400">approx. — edit if needed</span>
-                      )}
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-500 whitespace-nowrap">1 {effectiveTxCurrency} =</span>
-                      <input
-                        type="number"
-                        step="0.000001"
-                        min="0.000001"
-                        value={transactionForm.exchange_rate_to_base}
-                        onChange={(e) => setTransactionForm({...transactionForm, exchange_rate_to_base: e.target.value})}
-                        className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                        placeholder="enter rate"
-                      />
-                      <span className="text-sm text-gray-500">{txResolvedBase}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Amount */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-                    {effectiveTxCurrency || account.currency}
-                  </span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={transactionForm.amount}
-                    onChange={(e) => setTransactionForm({...transactionForm, amount: e.target.value})}
-                    className="w-full pl-12 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <input
-                  type="text"
-                  value={transactionForm.description}
-                  onChange={(e) => { setTransactionForm({...transactionForm, description: e.target.value}); handleDescriptionChange(e.target.value); }}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="What's this for?"
-                />
-              </div>
-
-              {/* Date */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                <input
-                  type="date"
-                  value={formatDateForInput(transactionForm.transaction_date)}
-                  onChange={(e) => setTransactionForm({...transactionForm, transaction_date: parseDateForPicker(e.target.value)})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowTransactionModal(false)}
-                  className="flex-1 px-4 py-2.5 border rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createTransactionMutation.isPending || !transactionForm.amount}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {createTransactionMutation.isPending ? 'Adding...' : 'Add'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Transfer Modal */}
       {showTransferModal && (
         <TransferModal
@@ -719,6 +389,11 @@ const AccountDetail = () => {
           }}
         />
       )}
+      <FloatingAddTransactionButton
+        accounts={allAccounts}
+        categories={categories}
+        defaultAccountId={accountId}
+      />
     </div>
   );
 };

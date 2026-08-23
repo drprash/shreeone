@@ -391,10 +391,14 @@ def get_family_transactions(
     Get family transactions with privacy-level filtering.
     
     Privacy Levels:
-    - PRIVATE: Members only see their own transactions
-    - SHARED: Members see shared account transactions + their own
+    - PRIVATE: Members see transactions they created or on accounts they own
+    - SHARED: Members see shared account transactions + their own (created or owned)
     - FAMILY: Members see all family transactions
     - ADMIN: Always sees all transactions
+
+    Owned-account matching keeps this list consistent with the account-detail
+    view, which shows the full ledger of any account the user can access
+    (e.g. admin-created corrections on a member's personal account).
     """
     # Get family privacy level
     family = db.query(models.Family).filter_by(id=family_id).first()
@@ -414,14 +418,20 @@ def get_family_transactions(
     # APPLY PRIVACY FILTERING (non-admin users only)
     if user.role != models.Role.ADMIN:
         if privacy_level == models.PrivacyLevel.PRIVATE:
-            # Members only see their own transactions
-            query = query.filter(models.Transaction.created_by_user_id == user.id)
+            # Members see transactions they created or on accounts they own
+            query = query.filter(
+                or_(
+                    models.Transaction.created_by_user_id == user.id,
+                    models.Account.owner_user_id == user.id
+                )
+            )
         elif privacy_level == models.PrivacyLevel.SHARED:
-            # Members see shared account transactions + their own
+            # Members see shared account transactions + their own (created or owned)
             query = query.filter(
                 or_(
                     models.Account.owner_type == models.OwnerType.SHARED,
-                    models.Transaction.created_by_user_id == user.id
+                    models.Transaction.created_by_user_id == user.id,
+                    models.Account.owner_user_id == user.id
                 )
             )
         # else PrivacyLevel.FAMILY: see all (no additional filtering)

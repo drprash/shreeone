@@ -652,7 +652,7 @@ class StatementParseResponse(BaseModel):
 
 
 class BulkTransactionItem(BaseModel):
-    """Single item in a bulk create request (EXPENSE only)."""
+    """Single item in a bulk create request (INCOME or EXPENSE; no transfers)."""
     type: str = "EXPENSE"
     amount: Decimal = Field(..., gt=0)
     currency: str = Field(..., min_length=3, max_length=3)

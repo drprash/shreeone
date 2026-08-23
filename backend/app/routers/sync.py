@@ -145,14 +145,19 @@ def sync_pull(
     )
     if current_user.role != models.Role.ADMIN:
         if privacy_level == models.PrivacyLevel.PRIVATE:
+            # Same semantics as crud.get_family_transactions: created or owned
             transaction_query = transaction_query.filter(
-                models.Transaction.created_by_user_id == current_user.id
+                or_(
+                    models.Transaction.created_by_user_id == current_user.id,
+                    models.Account.owner_user_id == current_user.id,
+                )
             )
         elif privacy_level == models.PrivacyLevel.SHARED:
             transaction_query = transaction_query.filter(
                 or_(
                     models.Account.owner_type == models.OwnerType.SHARED,
                     models.Transaction.created_by_user_id == current_user.id,
+                    models.Account.owner_user_id == current_user.id,
                 )
             )
     transactions = (

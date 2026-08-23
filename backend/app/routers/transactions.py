@@ -173,22 +173,28 @@ def bulk_create_transactions(
     current_user: models.User = Depends(auth.require_member_permission("add_transaction")),
 ):
     """
-    Create multiple EXPENSE transactions in one request.
+    Create multiple INCOME/EXPENSE transactions in one request.
     Used by the statement upload preview → confirm flow.
     Partial success is allowed: failed rows are counted but do not abort the batch.
+    TRANSFER rows are rejected — transfers need linked legs, unsupported in bulk.
     """
     created_ids = []
     failures = []
 
     for idx, item in enumerate(payload.transactions):
         try:
+            tx_type_raw = (item.type or "EXPENSE").upper()
+            if tx_type_raw not in ("INCOME", "EXPENSE"):
+                failures.append(f"Row {idx + 1}: unsupported transaction type '{item.type}'")
+                continue
+
             account = crud.get_account(db, item.account_id)
             if not account or not auth.check_account_access(current_user, account):
                 failures.append(f"Row {idx + 1}: account not found or access denied")
                 continue
 
             tx_in = schemas.TransactionCreate(
-                type=models.TransactionType.EXPENSE,
+                type=models.TransactionType[tx_type_raw],
                 amount=item.amount,
                 currency=item.currency.upper(),
                 description=item.description,

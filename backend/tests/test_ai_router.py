@@ -560,3 +560,20 @@ def test_categorize_blocked_when_services_disabled():
         )
     assert resp.status_code == 403
     assert "disabled" in resp.json()["detail"].lower()
+
+
+class TestParseStatementIncomeType:
+    def test_rows_carry_type_through(self):
+        parsed = [
+            {"date": "2026-04-01", "description": "Salary", "amount": 1000.0, "type": "INCOME"},
+            {"date": "2026-04-02", "description": "Tesco", "amount": 45.0, "type": "EXPENSE"},
+        ]
+        with patch("app.services.ai_service.is_available", return_value=True), \
+             patch("app.services.ai_service.parse_statement", return_value=parsed), \
+             patch("app.services.ai_service.categorize_transaction", return_value=None):
+            r = client.post(
+                "/api/ai/parse-statement",
+                files={"file": ("stmt.pdf", io.BytesIO(b"data"), "application/pdf")},
+            )
+        assert r.status_code == 200, r.text
+        assert [t["type"] for t in r.json()["transactions"]] == ["INCOME", "EXPENSE"]

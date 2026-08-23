@@ -640,6 +640,7 @@ class StatementTransaction(BaseModel):
     date: Optional[str] = None          # YYYY-MM-DD
     description: Optional[str] = None
     amount: Optional[Decimal] = None
+    type: str = "EXPENSE"               # EXPENSE or INCOME (bank deposits)
     currency: Optional[str] = None      # populated after AI categorisation
     category_hint: Optional[str] = None
     duplicate: bool = False             # True if a matching transaction already exists

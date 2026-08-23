@@ -277,28 +277,60 @@ def _extract_text_from_pdf(pdf_bytes: bytes, backend) -> Optional[str]:
         return None
 
 
+def _normalize_statement_rows(rows) -> Optional[list]:
+    """Keep rows with date+amount; coerce `type` to INCOME/EXPENSE (default EXPENSE)."""
+    valid = []
+    for r in rows:
+        if not (isinstance(r, dict) and "amount" in r and "date" in r):
+            continue
+        row_type = str(r.get("type", "")).upper()
+        r["type"] = row_type if row_type in ("INCOME", "EXPENSE") else "EXPENSE"
+        valid.append(r)
+    return valid if valid else None
+
+
 def _extract_transactions_from_text(
     text: str, account_type: str, backend
 ) -> Optional[list]:
     """
-    Ask the LLM to identify expense/debit transactions from extracted statement text.
-    account_type: "BANK" or "CREDIT_CARD"
+    Ask the LLM to extract transactions from statement text.
+    BANK: both debits (EXPENSE) and deposits/credits (INCOME).
+    CREDIT_CARD: charges only — credits there are payments/refunds, not income.
     Returns list of dicts or None.
     """
     if not text:
         return None
 
     truncated = text[:4000]
-    debit_label = "debit/withdrawal" if account_type == "BANK" else "charge/purchase"
 
-    prompt = f"""You are a bank statement parser for a family finance app.
-Extract all {debit_label} (expense) transactions from the statement text below.
+    if account_type == "BANK":
+        prompt = f"""You are a bank statement parser for a family finance app.
+Extract all transactions from the statement text below — both debits/withdrawals and deposits/credits.
+Ignore opening/closing balance rows.
+
+Return ONLY valid JSON array. Each item must have:
+  "date": "YYYY-MM-DD",
+  "description": "merchant or narration text",
+  "amount": positive number,
+  "type": "EXPENSE" for a debit/withdrawal, "INCOME" for a deposit/credit
+
+If no transactions found, return [].
+
+Statement text:
+\"\"\"
+{truncated}
+\"\"\"
+
+JSON array:"""
+    else:
+        prompt = f"""You are a credit-card statement parser for a family finance app.
+Extract all charge/purchase (expense) transactions from the statement text below.
 Ignore credits, deposits, payments, and opening/closing balance rows.
 
 Return ONLY valid JSON array. Each item must have:
   "date": "YYYY-MM-DD",
   "description": "merchant or narration text",
-  "amount": positive number (debit amount only)
+  "amount": positive number (charge amount only)
 
 If no expense transactions found, return [].
 
@@ -318,12 +350,7 @@ JSON array:"""
     if start == -1 or end == 0:
         return None
     try:
-        rows = json.loads(raw[start:end])
-        valid = [
-            r for r in rows
-            if isinstance(r, dict) and "amount" in r and "date" in r
-        ]
-        return valid if valid else None
+        return _normalize_statement_rows(json.loads(raw[start:end]))
     except json.JSONDecodeError:
         return None
 
@@ -333,9 +360,11 @@ def parse_statement(
     family_id=None, db=None,
 ) -> Optional[list]:
     """
-    Parse a bank/credit-card statement (PDF or image) and return expense transactions.
+    Parse a bank/credit-card statement (PDF or image) and return transactions.
+    BANK statements yield both EXPENSE and INCOME rows; CREDIT_CARD yields
+    charges (EXPENSE) only. Each row: {"date", "description", "amount", "type"}.
 
-    Returns list of {"date", "description", "amount"} dicts or None on failure.
+    Returns list of dicts or None on failure.
     """
     backend = _get_backend(family_id, db)
 
@@ -348,23 +377,32 @@ def parse_statement(
     # Image statement — pass directly to vision model
     b64 = base64.b64encode(file_bytes).decode()
     data_url = f"data:{mime_type};base64,{b64}"
-    debit_label = "debit/withdrawal" if account_type == "BANK" else "charge/purchase"
+
+    if account_type == "BANK":
+        instruction = (
+            "You are a bank statement parser. Extract all transactions from this statement image — "
+            "both debits/withdrawals and deposits/credits.\n"
+            "Ignore opening/closing balance rows.\n"
+            "Return ONLY a valid JSON array. Each item: "
+            '{"date": "YYYY-MM-DD", "description": "merchant or narration", "amount": positive number, '
+            '"type": "EXPENSE" for a debit/withdrawal or "INCOME" for a deposit/credit}.\n'
+            "If none found, return []."
+        )
+    else:
+        instruction = (
+            "You are a credit-card statement parser. Extract all charge/purchase (expense) transactions from this statement image.\n"
+            "Ignore credits, deposits, and balance rows.\n"
+            "Return ONLY a valid JSON array. Each item: "
+            '{"date": "YYYY-MM-DD", "description": "merchant or narration", "amount": positive number}.\n'
+            "If none found, return []."
+        )
 
     messages = [
         {
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": data_url}},
-                {
-                    "type": "text",
-                    "text": (
-                        f"You are a bank statement parser. Extract all {debit_label} (expense) transactions from this statement image.\n"
-                        "Ignore credits, deposits, and balance rows.\n"
-                        "Return ONLY a valid JSON array. Each item: "
-                        '{"date": "YYYY-MM-DD", "description": "merchant or narration", "amount": positive number}.\n'
-                        "If none found, return []."
-                    ),
-                },
+                {"type": "text", "text": instruction},
             ],
         }
     ]
@@ -378,9 +416,7 @@ def parse_statement(
     if start == -1 or end == 0:
         return None
     try:
-        rows = json.loads(raw[start:end])
-        valid = [r for r in rows if isinstance(r, dict) and "amount" in r and "date" in r]
-        return valid if valid else None
+        return _normalize_statement_rows(json.loads(raw[start:end]))
     except json.JSONDecodeError:
         return None
 

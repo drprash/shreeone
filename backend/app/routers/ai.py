@@ -316,7 +316,8 @@ async def parse_statement(
     db: Session = Depends(get_db),
 ):
     """
-    Upload a bank or credit-card statement (PDF or image) → list of expense transactions.
+    Upload a bank or credit-card statement (PDF or image) → list of transactions.
+    BANK statements yield EXPENSE and INCOME rows; CREDIT_CARD yields charges only.
 
     account_type: "BANK" or "CREDIT_CARD"
     Returns StatementParseResponse for the frontend preview table.
@@ -394,14 +395,16 @@ async def parse_statement(
         amount = row.get("amount")
         is_dup = (date_str, float(amount)) in existing_keys if amount else False
 
-        # Best-effort category hint via AI
+        row_type = row.get("type", "EXPENSE")
+
+        # Best-effort category hint via AI, matched to the row's type
         description = row.get("description", "")
         category_hint = None
         if description:
             categories = db.query(models.Category).filter(
                 models.Category.family_id == current_user.family_id,
                 models.Category.deleted_at.is_(None),
-                models.Category.type == "EXPENSE",
+                models.Category.type == row_type,
             ).all()
             cat_result = ai_service.categorize_transaction(
                 description, [c.name for c in categories],
@@ -414,6 +417,7 @@ async def parse_statement(
             date=date_str or None,
             description=description or None,
             amount=amount,
+            type=row_type,
             category_hint=category_hint,
             duplicate=is_dup,
         ))

@@ -166,7 +166,7 @@ const Transactions = () => {
     try {
       const result = await parseStatement(statementFile, statementAccountId, statementAccountType);
       if (!result?.transactions?.length) {
-        toast.error('No expense transactions found in the statement');
+        toast.error('No transactions found in the statement');
         return;
       }
       const selectedAcc = accounts?.find(a => a.id === statementAccountId);
@@ -174,6 +174,7 @@ const Transactions = () => {
       // Attach currency and toggle selected for non-duplicates
       setStatementRows(result.transactions.map(row => ({
         ...row,
+        type: row.type === 'INCOME' ? 'INCOME' : 'EXPENSE',
         currency: row.currency || accCurrency,
         selected: !row.duplicate,
       })));
@@ -193,7 +194,7 @@ const Transactions = () => {
       const selectedAcc = accounts?.find(a => a.id === statementAccountId);
       const accCurrency = selectedAcc?.currency || 'USD';
       const transactions = toImport.map(row => ({
-        type: 'EXPENSE',
+        type: row.type === 'INCOME' ? 'INCOME' : 'EXPENSE',
         amount: parseFloat(row.amount),
         currency: row.currency || accCurrency,
         description: row.description || '',
@@ -1122,6 +1123,7 @@ const Transactions = () => {
                         <th className="px-3 py-2 font-medium text-gray-600 w-8"></th>
                         <th className="px-3 py-2 font-medium text-gray-600">Date</th>
                         <th className="px-3 py-2 font-medium text-gray-600">Description</th>
+                        <th className="px-3 py-2 font-medium text-gray-600">Type</th>
                         <th className="px-3 py-2 font-medium text-gray-600">Category</th>
                         <th className="px-3 py-2 font-medium text-gray-600 text-right">Amount</th>
                         <th className="px-3 py-2 font-medium text-gray-600 w-8"></th>
@@ -1153,9 +1155,27 @@ const Transactions = () => {
                               )}
                             />
                           </td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              title="Click to switch between expense and income"
+                              onClick={() => setStatementRows(prev =>
+                                prev.map((r, j) => j === i
+                                  ? { ...r, type: r.type === 'INCOME' ? 'EXPENSE' : 'INCOME' }
+                                  : r)
+                              )}
+                              className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                                row.type === 'INCOME'
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-red-100 text-red-700 hover:bg-red-200'
+                              }`}
+                            >
+                              {row.type === 'INCOME' ? 'Income' : 'Expense'}
+                            </button>
+                          </td>
                           <td className="px-3 py-2 text-gray-500 text-xs">{row.category_hint || '—'}</td>
-                          <td className="px-3 py-2 text-right font-medium text-red-600 whitespace-nowrap">
-                            {row.currency} {parseFloat(row.amount || 0).toFixed(2)}
+                          <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${row.type === 'INCOME' ? 'text-green-600' : 'text-red-600'}`}>
+                            {row.type === 'INCOME' ? '+' : ''}{row.currency} {parseFloat(row.amount || 0).toFixed(2)}
                           </td>
                           <td className="px-3 py-2 text-center">
                             {row.duplicate && (

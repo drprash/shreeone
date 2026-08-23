@@ -297,3 +297,53 @@ def test_extract_json_returns_none_for_empty_string():
 def test_extract_json_returns_none_for_malformed_json():
     result = ai_service._extract_json("{bad: json}")
     assert result is None
+
+
+# ── parse_statement income extraction (BANK only) ─────────────────────────────
+
+def test_parse_statement_bank_preserves_income_type():
+    rows = json.dumps([
+        {"date": "2026-04-01", "description": "Salary ACME", "amount": 5000.0, "type": "INCOME"},
+        {"date": "2026-04-02", "description": "Tesco", "amount": 45.0, "type": "EXPENSE"},
+    ])
+    with patch("httpx.post", return_value=_mock_chat(rows)):
+        result = ai_service.parse_statement(b"img-bytes", "image/jpeg", "BANK")
+    assert result[0]["type"] == "INCOME"
+    assert result[1]["type"] == "EXPENSE"
+
+
+def test_parse_statement_missing_or_invalid_type_defaults_to_expense():
+    rows = json.dumps([
+        {"date": "2026-04-01", "description": "Tesco", "amount": 45.0},
+        {"date": "2026-04-02", "description": "Odd row", "amount": 5.0, "type": "REFUND"},
+    ])
+    with patch("httpx.post", return_value=_mock_chat(rows)):
+        result = ai_service.parse_statement(b"img-bytes", "image/jpeg", "BANK")
+    assert [r["type"] for r in result] == ["EXPENSE", "EXPENSE"]
+
+
+def test_parse_statement_bank_prompt_requests_income_and_expense():
+    with patch("httpx.post", return_value=_mock_chat("[]")) as mock_post:
+        ai_service.parse_statement(b"img-bytes", "image/jpeg", "BANK")
+    sent = str(mock_post.call_args)
+    assert "INCOME" in sent
+
+
+def test_parse_statement_credit_card_prompt_stays_charges_only():
+    with patch("httpx.post", return_value=_mock_chat("[]")) as mock_post:
+        ai_service.parse_statement(b"img-bytes", "image/jpeg", "CREDIT_CARD")
+    sent = str(mock_post.call_args)
+    assert "INCOME" not in sent
+    assert "Ignore credits" in sent
+
+
+def test_extract_from_text_bank_preserves_type():
+    rows = json.dumps([
+        {"date": "2026-04-01", "description": "Salary", "amount": 1000.0, "type": "INCOME"},
+    ])
+    # Ollama's complete() delegates to chat(), so mock the chat response shape
+    with patch("httpx.post", return_value=_mock_chat(rows)):
+        result = ai_service._extract_transactions_from_text(
+            "statement text", "BANK", ai_service._get_backend(None, None)
+        )
+    assert result[0]["type"] == "INCOME"

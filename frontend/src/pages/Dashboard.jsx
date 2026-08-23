@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { Wallet, Plus } from 'lucide-react';
 import api from '../services/api';
 import SummaryCards from '../components/Dashboard/SummaryCards';
 import RecentTransactions from '../components/Dashboard/RecentTransactions';
@@ -98,6 +100,29 @@ const Dashboard = () => {
         <NarrativeBanner />
       </React.Suspense>
 
+      {accounts?.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-10 text-center">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-900/40 flex items-center justify-center mb-4">
+            <Wallet className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-slate-100 mb-2">
+            Let's set up your finances
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-slate-400 mb-6 max-w-md mx-auto">
+            {isAdmin
+              ? 'Add your first account — a bank account, credit card, or cash wallet — and your dashboard will come to life.'
+              : 'No accounts are visible to you yet. Add one of your own, or ask your family admin to share accounts with you.'}
+          </p>
+          <Link
+            to="/accounts"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add your first account
+          </Link>
+        </div>
+      ) : (
+      <>
       <FloatingAddTransactionButton accounts={accounts} categories={categories} baseCurrency={dashboardData?.summary?.base_currency} />
 
       {/* Admin-only summary filter */}
@@ -165,6 +190,8 @@ const Dashboard = () => {
 
       {dashboardData?.recent_transactions && (
         <RecentTransactions transactions={dashboardData.recent_transactions} />
+      )}
+      </>
       )}
     </div>
   );

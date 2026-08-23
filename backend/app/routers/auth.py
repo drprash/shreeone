@@ -132,6 +132,8 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
         base_currency=user_data.base_currency or "USD"
     ))
 
+    crud.seed_default_categories(db, family.id)
+
     user = crud.create_user(
         db=db,
         user=user_data,

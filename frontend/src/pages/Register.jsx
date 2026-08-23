@@ -207,10 +207,10 @@ const Register = () => {
 
         <button
           type="submit"
-          disabled={mutation.isLoading}
+          disabled={mutation.isPending}
           className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
         >
-          {mutation.isLoading ? 'Creating account...' : 'Create Account'}
+          {mutation.isPending ? 'Creating account...' : 'Create Account'}
         </button>
       </form>
 

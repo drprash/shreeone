@@ -231,6 +231,41 @@ def get_account_including_archived(db: Session, account_id: UUID) -> Optional[mo
     ).first()
 
 # Category operations
+DEFAULT_CATEGORIES = [
+    # (name, type, color)
+    ("Groceries", models.CategoryType.EXPENSE, "#22c55e"),
+    ("Dining Out", models.CategoryType.EXPENSE, "#f97316"),
+    ("Transport", models.CategoryType.EXPENSE, "#3b82f6"),
+    ("Utilities", models.CategoryType.EXPENSE, "#eab308"),
+    ("Rent & Housing", models.CategoryType.EXPENSE, "#8b5cf6"),
+    ("Health", models.CategoryType.EXPENSE, "#ef4444"),
+    ("Education", models.CategoryType.EXPENSE, "#06b6d4"),
+    ("Shopping", models.CategoryType.EXPENSE, "#ec4899"),
+    ("Entertainment", models.CategoryType.EXPENSE, "#a855f7"),
+    ("EMI & Loans", models.CategoryType.EXPENSE, "#64748b"),
+    ("Salary", models.CategoryType.INCOME, "#16a34a"),
+    ("Business", models.CategoryType.INCOME, "#0ea5e9"),
+    ("Investment Income", models.CategoryType.INCOME, "#7c3aed"),
+    ("Other Income", models.CategoryType.INCOME, "#94a3b8"),
+]
+
+def seed_default_categories(db: Session, family_id: UUID) -> List[models.Category]:
+    """Create the starter category set for a newly registered family."""
+    sort_orders = {models.CategoryType.EXPENSE: 0, models.CategoryType.INCOME: 0}
+    categories = []
+    for name, cat_type, color in DEFAULT_CATEGORIES:
+        categories.append(models.Category(
+            family_id=family_id,
+            name=name,
+            type=cat_type,
+            color=color,
+            sort_order=sort_orders[cat_type],
+        ))
+        sort_orders[cat_type] += 1
+    db.add_all(categories)
+    db.commit()
+    return categories
+
 def create_category(db: Session, category: schemas.CategoryCreate, family_id: UUID) -> models.Category:
     # Auto-assign sort_order: max within same family+type + 1
     max_sort = db.query(models.Category.sort_order).filter(

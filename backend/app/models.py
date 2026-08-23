@@ -98,7 +98,7 @@ class User(Base):
     active = Column(Boolean, default=True)
     activated = Column(Boolean, default=False)  # True after user sets password for first time
     password_required = Column(Boolean, default=True)  # True if user must set password on first login
-    created_at = Column(DateTime, default=datetime.utcnow)
+    onboarding_completed = Column(Boolean, default=False, nullable=False)  # True once the welcome tour is done    created_at = Column(DateTime, default=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)
     
     family = relationship("Family", back_populates="users")

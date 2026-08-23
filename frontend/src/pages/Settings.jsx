@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { PlayCircle } from 'lucide-react';
+import { replayOnboardingTour } from '../hooks/useOnboarding';
 import MemberManagement from '../components/Settings/MemberManagement';
 import BudgetSettings from '../components/Settings/BudgetSettings';
 import RecurringPayments from '../components/Settings/RecurringPayments';
@@ -11,9 +14,15 @@ import { useAuthStore } from '../store/authStore';
 import settingsAPI from '../services/settingsAPI';
 
 const Settings = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('family');
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === 'ADMIN';
+
+  const handleReplayTour = () => {
+    navigate('/');
+    replayOnboardingTour();
+  };
 
   const { data: familyProfile } = useQuery({
     queryKey: ['settings', 'family-profile'],
@@ -34,9 +43,18 @@ const Settings = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-8">
         <div className="max-w-6xl mx-auto px-4">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2">Settings</h1>
-            <p className="text-slate-600 dark:text-slate-400">Manage your family finances and preferences</p>
+          <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2">Settings</h1>
+              <p className="text-slate-600 dark:text-slate-400">Manage your family finances and preferences</p>
+            </div>
+            <button
+              onClick={handleReplayTour}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              <PlayCircle className="w-4 h-4" />
+              Replay welcome tour
+            </button>
           </div>
 
           {/* Tabs Navigation */}

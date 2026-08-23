@@ -1,5 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
+import api from '../services/api';
+
+const REPLAY_EVENT = 'shreeone-replay-tour';
+
+// Reopen the tour from anywhere (e.g. Settings → "Replay welcome tour")
+export function replayOnboardingTour() {
+  window.dispatchEvent(new Event(REPLAY_EVENT));
+}
 
 const ADMIN_STEPS = [
   {
@@ -41,7 +49,7 @@ const ADMIN_STEPS = [
   {
     icon: 'zap',
     title: "You're all set!",
-    body: "Use Quick Add on the dashboard to log a transaction in seconds. Your family's finances are in good hands.",
+    body: "Tap the floating + button on the dashboard to log a transaction in seconds. Your family's finances are in good hands.",
     navHint: null,
   },
 ];
@@ -62,7 +70,7 @@ const MEMBER_STEPS = [
   {
     icon: 'zap',
     title: 'Quick Add',
-    body: 'The Quick Add panel on the dashboard lets you log an expense or income in just a few taps.',
+    body: 'Tap the floating + button at the bottom-right of the dashboard to log an expense or income in just a few taps.',
     navHint: { label: 'Dashboard', href: '/' },
   },
   {
@@ -84,7 +92,7 @@ function tourKey(userId) {
 }
 
 export function useOnboarding() {
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, updateUser } = useAuthStore();
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -92,16 +100,32 @@ export function useOnboarding() {
 
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;
+    // Server-side flag survives new devices and cleared storage; the
+    // localStorage key stops a re-show before the server flag syncs.
     const done = localStorage.getItem(tourKey(user.id));
-    if (!done) {
+    if (!done && user.onboarding_completed !== true) {
       setCurrentStep(0);
       setIsOpen(true);
     }
   }, [isAuthenticated, user?.id]);
 
+  useEffect(() => {
+    const replay = () => {
+      setCurrentStep(0);
+      setIsOpen(true);
+    };
+    window.addEventListener(REPLAY_EVENT, replay);
+    return () => window.removeEventListener(REPLAY_EVENT, replay);
+  }, []);
+
   function markDone() {
     if (user?.id) localStorage.setItem(tourKey(user.id), '1');
     setIsOpen(false);
+    if (user?.onboarding_completed !== true) {
+      api.post('/auth/onboarding-complete')
+        .then(() => updateUser({ onboarding_completed: true }))
+        .catch(() => {}); // offline/transient failure — localStorage still guards this device
+    }
   }
 
   function goNext() {

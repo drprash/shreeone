@@ -91,6 +91,9 @@ const MemberManagement = () => {
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
+  const activationLink = (token) =>
+    `${window.location.origin}/set-password?token=${encodeURIComponent(token)}`;
+
   const handleUpdatePermissions = async (memberId) => {
     try {
       setError(null);
@@ -391,24 +394,45 @@ const MemberManagement = () => {
                 <h3 className="text-xl font-bold text-slate-900 mb-4">Member Created!</h3>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                   <p className="text-sm text-slate-700 mb-3">
-                    <strong>Share this activation token with the member:</strong>
+                    <strong>Share this activation link with the member:</strong>
                   </p>
                   <div className="bg-white border border-blue-300 rounded p-3 flex items-center justify-between mb-2">
                     <code className="text-xs text-slate-700 break-all flex-1">
-                      {inviteData.activation_token}
+                      {activationLink(inviteData.activation_token)}
                     </code>
                     <button
-                      onClick={() => copyToClipboard(inviteData.activation_token, 'token')}
+                      onClick={() => copyToClipboard(activationLink(inviteData.activation_token), 'link')}
                       className="ml-2 p-2 hover:bg-slate-200 rounded transition-colors"
-                      title="Copy token"
+                      title="Copy activation link"
                     >
-                      {copiedToken === 'token' ? (
+                      {copiedToken === 'link' ? (
                         <Check className="w-4 h-4 text-green-600" />
                       ) : (
                         <Copy className="w-4 h-4 text-slate-600" />
                       )}
                     </button>
                   </div>
+                  <details className="mb-2">
+                    <summary className="text-xs text-slate-500 cursor-pointer">
+                      Or share the raw token instead
+                    </summary>
+                    <div className="bg-white border border-blue-200 rounded p-2 flex items-center justify-between mt-2">
+                      <code className="text-xs text-slate-600 break-all flex-1">
+                        {inviteData.activation_token}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(inviteData.activation_token, 'token')}
+                        className="ml-2 p-2 hover:bg-slate-200 rounded transition-colors"
+                        title="Copy token"
+                      >
+                        {copiedToken === 'token' ? (
+                          <Check className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <Copy className="w-4 h-4 text-slate-600" />
+                        )}
+                      </button>
+                    </div>
+                  </details>
                   <p className="text-xs text-slate-600">
                     Token expires: {new Date(inviteData.activation_expires_at).toLocaleString()}
                   </p>
@@ -419,10 +443,9 @@ const MemberManagement = () => {
                     <strong>Instructions:</strong>
                   </p>
                   <ol className="text-xs text-slate-600 mt-2 list-decimal list-inside space-y-1">
-                    <li>Send the activation token to the member</li>
-                    <li>They visit the app and use "Set Password" option</li>
-                    <li>They paste the token and create their password</li>
-                    <li>They can then log in normally</li>
+                    <li>Send the activation link to the member</li>
+                    <li>They open it and create their password</li>
+                    <li>They're signed in automatically — done!</li>
                   </ol>
                 </div>
 
@@ -572,13 +595,35 @@ const MemberManagement = () => {
               Password Reset Token for {selectedMember?.first_name}
             </h3>
             <p className="text-slate-600 dark:text-slate-400 mb-4">
-              Share this token with {selectedMember?.first_name} so they can reset their password. Token expires in 72 hours.
+              Share this link with {selectedMember?.first_name} so they can reset their password. It expires in 72 hours.
             </p>
 
             <div className="space-y-3 mb-6">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Reset Token (Valid for 72 hours)
+                  Reset Link (Valid for 72 hours)
+                </label>
+                <div className="flex items-center gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={activationLink(resetPasswordToken.token)}
+                    readOnly
+                    className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-400 font-mono text-xs break-all"
+                  />
+                  <button
+                    onClick={() => copyToClipboard(activationLink(resetPasswordToken.token), 'reset-link')}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                    title="Copy reset link"
+                  >
+                    {copiedToken === 'reset-link' ? (
+                      <Check className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <Copy className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    )}
+                  </button>
+                </div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Reset Token
                 </label>
                 <div className="flex items-center gap-2">
                   <input

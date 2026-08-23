@@ -15,6 +15,12 @@ const extractLoginErrorMessage = (error) => {
     return detail;
   }
 
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    if (typeof detail.message === 'string' && detail.message.trim()) {
+      return detail.message;
+    }
+  }
+
   if (Array.isArray(detail) && detail.length > 0) {
     const firstItem = detail[0];
     if (typeof firstItem === 'string' && firstItem.trim()) {
@@ -54,10 +60,11 @@ const Login = () => {
       navigate('/');
     },
     onError: (error) => {
+      const errorCode = error?.response?.data?.detail?.code;
       const detail = extractLoginErrorMessage(error);
       const normalizedDetail = detail.toLowerCase();
 
-      if (normalizedDetail.includes('set your password') || normalizedDetail.includes('activation token')) {
+      if (errorCode === 'PASSWORD_SETUP_REQUIRED' || normalizedDetail.includes('set your password') || normalizedDetail.includes('activation token')) {
         toast.error('You need to set your password first with your activation token');
         setShowSetPasswordMode(true);
       } else if (normalizedDetail.includes('invalid credentials')) {
@@ -105,7 +112,7 @@ const Login = () => {
         <div className="space-y-4">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-slate-700">
             <p className="font-semibold mb-2">👋 New Member?</p>
-            <p>If you were just added to the family, you'll receive an activation token. Use it below to set your password.</p>
+            <p>If you were just added to the family, your admin will share an activation link or token. Got a link? Just open it. Got a token? Paste it below to set your password.</p>
           </div>
 
           <div>
@@ -199,9 +206,10 @@ const Login = () => {
             <button
               type="button"
               onClick={() => setShowSetPasswordMode(true)}
-              className="w-full text-blue-600 hover:text-blue-700 text-sm font-medium"
+              className="w-full flex items-center justify-center gap-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 py-2 rounded-lg text-sm font-medium transition-colors"
             >
-              Set password with activation token?
+              <Key className="w-4 h-4" />
+              New member? Activate your account
             </button>
 
             <div className="border-t pt-4">

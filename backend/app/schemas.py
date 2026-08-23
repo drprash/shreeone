@@ -42,7 +42,7 @@ class UserResponse(UserBase):
     active: bool
     activated: bool
     password_required: bool
-    created_at: datetime
+    onboarding_completed: bool = False    created_at: datetime
     
     class Config:
         from_attributes = True

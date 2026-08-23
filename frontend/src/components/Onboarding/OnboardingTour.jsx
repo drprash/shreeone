@@ -36,6 +36,28 @@ const OnboardingTour = () => {
     }
   }, [isOpen, currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Closing the tour (skip or finish) returns the user to the dashboard so
+  // they aren't stranded on whatever page the last step navigated to.
+  const handleSkip = () => {
+    skip();
+    navigate('/');
+  };
+
+  const handleNext = () => {
+    const finishing = isLast;
+    goNext();
+    if (finishing) navigate('/');
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') handleSkip();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!isOpen || !step) return null;
 
   const StepIcon = ICON_MAP[step.icon] ?? Home;
@@ -51,7 +73,7 @@ const OnboardingTour = () => {
         {/* Skip */}
         <button
           type="button"
-          onClick={skip}
+          onClick={handleSkip}
           aria-label="Skip tour"
           className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
         >
@@ -108,7 +130,7 @@ const OnboardingTour = () => {
 
           <button
             type="button"
-            onClick={goNext}
+            onClick={handleNext}
             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors"
           >
             {isLast ? (

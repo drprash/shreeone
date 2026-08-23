@@ -199,7 +199,10 @@ def login(credentials: schemas.UserLogin, request: Request, db: Session = Depend
     if user.password_required or not user.password_hash:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You must set your password first using the activation token"
+            detail={
+                "code": "PASSWORD_SETUP_REQUIRED",
+                "message": "You must set your password first using the activation token"
+            }
         )
 
     if not auth.verify_password(credentials.password, user.password_hash):
@@ -354,6 +357,18 @@ def set_password(password_data: schemas.SetPasswordRequest, db: Session = Depend
         refresh_token=refresh_token,
         user=schemas.UserResponse.model_validate(user)
     )
+
+
+@router.post("/onboarding-complete", response_model=schemas.UserResponse)
+def complete_onboarding(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """Persist that the user has finished (or skipped) the welcome tour."""
+    current_user.onboarding_completed = True
+    db.commit()
+    db.refresh(current_user)
+    return schemas.UserResponse.model_validate(current_user)
 
 
 # ============ WebAuthn / Biometric ============

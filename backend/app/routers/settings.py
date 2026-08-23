@@ -97,6 +97,8 @@ def get_family_budgets(
 ):
     """Get all budget settings for the family"""
     budgets = crud.get_family_budget_settings(db, current_user.family_id)
+    for budget in budgets:
+        budget.spent_amount = crud.compute_budget_spent(db, budget)
     return budgets
 
 @router.get("/budgets/{budget_id}", response_model=schemas.BudgetWithCategoryResponse)
@@ -112,6 +114,7 @@ def get_budget(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Budget not found"
         )
+    budget.spent_amount = crud.compute_budget_spent(db, budget)
     return budget
 
 @router.post("/budgets", response_model=schemas.BudgetWithCategoryResponse, status_code=status.HTTP_201_CREATED)

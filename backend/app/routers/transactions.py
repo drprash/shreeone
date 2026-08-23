@@ -13,7 +13,7 @@ router = APIRouter(prefix="/transactions", tags=["Transactions"])
 def create_transaction(
     transaction: schemas.TransactionCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("add_transaction"))
 ):
     # Verify account access
     account = crud.get_account(db, transaction.account_id)
@@ -135,7 +135,7 @@ def update_transaction(
     transaction_id: UUID,
     transaction_update: schemas.TransactionUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("edit_transaction"))
 ):
     try:
         updated = crud.update_transaction(db, transaction_id, transaction_update, current_user)
@@ -160,12 +160,17 @@ def update_transaction(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 @router.post("/bulk", response_model=schemas.BulkTransactionResponse, status_code=status.HTTP_201_CREATED)
 def bulk_create_transactions(
     payload: schemas.BulkTransactionCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_member_permission("add_transaction")),
 ):
     """
     Create multiple EXPENSE transactions in one request.
@@ -218,7 +223,7 @@ def bulk_create_transactions(
 def delete_transaction(
     transaction_id: UUID,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("delete_transaction"))
 ):
     try:
         if not crud.delete_transaction(db, transaction_id, current_user):

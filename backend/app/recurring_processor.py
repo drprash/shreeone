@@ -75,20 +75,25 @@ class RecurringPaymentProcessor:
         # Get base currency for exchange rate calculation
         base_currency = account.family.base_currency
         account_currency = account.currency
+        due_date = recurring_payment.next_due_date
 
-        # Calculate exchange rate if currencies differ
+        # Calculate exchange rate if currencies differ — use the family's stored
+        # rates (same as manual entry), looked up for the due date being booked
         if account_currency == base_currency:
             exchange_rate = Decimal('1.0')
         else:
             exchange_rate = FinancialEngine.get_exchange_rate(
                 db,
                 account_currency,
-                base_currency
+                base_currency,
+                family_id=account.family_id,
+                for_date=due_date.date(),
             )
 
         amount_in_base = recurring_payment.amount * exchange_rate
 
-        # Create transaction for the recurring payment
+        # Create transaction for the recurring payment, dated on its due date so
+        # overdue catch-up runs land in the correct period
         transaction = models.Transaction(
             account_id=recurring_payment.account_id,
             created_by_user_id=recurring_payment.created_by_user_id,
@@ -99,7 +104,7 @@ class RecurringPaymentProcessor:
             amount_in_base_currency=amount_in_base,
             category_id=recurring_payment.category_id,
             description=f"[Recurring] {recurring_payment.name}",
-            transaction_date=datetime.utcnow(),
+            transaction_date=due_date,
             is_source_transaction=True
         )
 

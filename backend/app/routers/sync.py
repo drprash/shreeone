@@ -79,7 +79,15 @@ def sync_pull(
     """
     cursor = since or datetime.fromtimestamp(0)
 
-    accounts = (
+    # Mirror the online API's visibility rules: members only ever sync shared
+    # accounts and their own personal accounts, and transaction visibility
+    # follows the family privacy level (same as crud.get_family_transactions).
+    privacy_level = (
+        current_user.family.privacy_level
+        if current_user.family else models.PrivacyLevel.FAMILY
+    )
+
+    account_query = (
         db.query(models.Account)
         .options(joinedload(models.Account.owner))
         .filter(
@@ -91,6 +99,16 @@ def sync_pull(
                 models.Account.updated_at.is_(None),
             ),
         )
+    )
+    if current_user.role != models.Role.ADMIN:
+        account_query = account_query.filter(
+            or_(
+                models.Account.owner_type == models.OwnerType.SHARED,
+                models.Account.owner_user_id == current_user.id,
+            )
+        )
+    accounts = (
+        account_query
         .order_by(models.Account.updated_at.asc(), models.Account.created_at.asc())
         .limit(limit)
         .all()
@@ -112,7 +130,7 @@ def sync_pull(
         .all()
     )
 
-    transactions = (
+    transaction_query = (
         db.query(models.Transaction)
         .join(models.Account, models.Transaction.account_id == models.Account.id)
         .filter(
@@ -124,6 +142,21 @@ def sync_pull(
                 models.Transaction.updated_at.is_(None),
             ),
         )
+    )
+    if current_user.role != models.Role.ADMIN:
+        if privacy_level == models.PrivacyLevel.PRIVATE:
+            transaction_query = transaction_query.filter(
+                models.Transaction.created_by_user_id == current_user.id
+            )
+        elif privacy_level == models.PrivacyLevel.SHARED:
+            transaction_query = transaction_query.filter(
+                or_(
+                    models.Account.owner_type == models.OwnerType.SHARED,
+                    models.Transaction.created_by_user_id == current_user.id,
+                )
+            )
+    transactions = (
+        transaction_query
         .order_by(models.Transaction.updated_at.asc(), models.Transaction.created_at.asc())
         .limit(limit)
         .all()

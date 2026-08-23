@@ -22,7 +22,7 @@ def reorder_accounts(
 def create_account(
     account: schemas.AccountCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("add_account"))
 ):
     # Validate owner permissions
     if account.owner_type == models.OwnerType.PERSONAL:
@@ -84,7 +84,7 @@ def update_account(
     account_id: UUID,
     account_update: schemas.AccountUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("edit_account"))
 ):
     account = crud.get_account(db, account_id)
     if not account or not auth.check_account_access(current_user, account):
@@ -126,7 +126,7 @@ def adjust_account_balance(
     account_id: UUID,
     adjust: schemas.BalanceAdjustRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("edit_account"))
 ):
     account = crud.get_account(db, account_id)
     if not account or not auth.check_account_access(current_user, account):
@@ -225,7 +225,7 @@ def adjust_account_balance(
 def delete_account(
     account_id: UUID,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_member_permission("delete_account"))
 ):
     account = crud.get_account(db, account_id)
     if not account:

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, func
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 from app import models, schemas, auth
 
 # Family operations
@@ -443,33 +444,66 @@ def update_transaction(
     db_transaction = get_transaction(db, transaction_id)
     if not db_transaction:
         return None
-    
+
+    # Tenant isolation: transactions outside the user's family don't exist for them
+    if db_transaction.account is None or db_transaction.account.family_id != user.family_id:
+        return None
+
     # Check permissions
     if user.role != models.Role.ADMIN and db_transaction.created_by_user_id != user.id:
         raise PermissionError("Cannot modify transaction created by another user")
-    
+
     update_data = transaction_update.dict(exclude_unset=True)
+
+    if 'category_id' in update_data:
+        from app.financial_logic import FinancialEngine
+        FinancialEngine.validate_category(
+            db, user.family_id, db_transaction.type, update_data['category_id']
+        )
+
+    old_amount = db_transaction.amount
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
-    
+
     # Recalculate base currency amount if amount changed
     if 'amount' in update_data and db_transaction.exchange_rate_to_base:
         db_transaction.amount_in_base_currency = update_data['amount'] * db_transaction.exchange_rate_to_base
-    
+
+    # Keep the other leg of a transfer in sync
+    linked = None
+    if db_transaction.linked_transaction_id:
+        linked = get_transaction(db, db_transaction.linked_transaction_id)
+    if linked:
+        if 'amount' in update_data and old_amount:
+            # Scale the linked leg by the same ratio to preserve the original
+            # conversion rate between the two legs
+            ratio = db_transaction.amount / old_amount
+            linked.amount = (linked.amount * ratio).quantize(Decimal('0.01'))
+            if linked.exchange_rate_to_base:
+                linked.amount_in_base_currency = linked.amount * linked.exchange_rate_to_base
+        if 'transaction_date' in update_data:
+            linked.transaction_date = update_data['transaction_date']
+
     db.commit()
     db.refresh(db_transaction)
-    
-    # Update account balance
+
+    # Update account balances (both legs for transfers)
     from app.financial_logic import FinancialEngine
     FinancialEngine.update_account_balance(db, str(db_transaction.account_id))
-    
+    if linked:
+        FinancialEngine.update_account_balance(db, str(linked.account_id))
+
     return db_transaction
 
 def delete_transaction(db: Session, transaction_id: UUID, user: models.User) -> bool:
     db_transaction = get_transaction(db, transaction_id)
     if not db_transaction:
         return False
-    
+
+    # Tenant isolation: transactions outside the user's family don't exist for them
+    if db_transaction.account is None or db_transaction.account.family_id != user.family_id:
+        return False
+
     # Check permissions
     if user.role != models.Role.ADMIN and db_transaction.created_by_user_id != user.id:
         raise PermissionError("Cannot delete transaction created by another user")
@@ -592,6 +626,35 @@ def get_family_budget_settings(db: Session, family_id: UUID) -> List[models.Budg
         selectinload(models.BudgetSetting.category),
         selectinload(models.BudgetSetting.user)
     ).all()
+
+def compute_budget_spent(db: Session, budget: models.BudgetSetting) -> Decimal:
+    """Sum EXPENSE transactions (in family base currency) for the budget's
+    current period. Scoped to the budget's category and/or user when set."""
+    now = datetime.utcnow()
+    if budget.period == models.BudgetPeriod.QUARTERLY:
+        quarter_month = ((now.month - 1) // 3) * 3 + 1
+        period_start = datetime(now.year, quarter_month, 1)
+    elif budget.period == models.BudgetPeriod.YEARLY:
+        period_start = datetime(now.year, 1, 1)
+    else:  # MONTHLY (default)
+        period_start = datetime(now.year, now.month, 1)
+
+    query = db.query(
+        func.coalesce(func.sum(models.Transaction.amount_in_base_currency), 0)
+    ).join(
+        models.Account, models.Transaction.account_id == models.Account.id
+    ).filter(
+        models.Account.family_id == budget.family_id,
+        models.Transaction.type == models.TransactionType.EXPENSE,
+        models.Transaction.deleted_at.is_(None),
+        models.Transaction.transaction_date >= period_start,
+    )
+    if budget.category_id:
+        query = query.filter(models.Transaction.category_id == budget.category_id)
+    if budget.user_id:
+        query = query.filter(models.Transaction.created_by_user_id == budget.user_id)
+
+    return Decimal(str(query.scalar() or 0))
 
 def get_category_budget(db: Session, family_id: UUID, category_id: UUID) -> Optional[models.BudgetSetting]:
     return db.query(models.BudgetSetting).filter(

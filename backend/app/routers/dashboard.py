@@ -75,8 +75,8 @@ def get_dashboard_with_country(
     country_totals: dict = {}
 
     for account in accounts:
-        # Mirror get_family_dashboard_data: non-admins skip excluded accounts
-        if not account.include_in_family_overview and current_user.role != models.Role.ADMIN:
+        # Mirror get_family_dashboard_data: excluded accounts stay out for everyone
+        if not account.include_in_family_overview:
             continue
 
         balance = FinancialEngine.calculate_account_balance(db, str(account.id))

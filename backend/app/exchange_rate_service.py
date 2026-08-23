@@ -16,10 +16,15 @@ Rate resolution order at query time (FinancialEngine.get_exchange_rate):
   3. FinancialEngine.DEFAULT_RATES (hardcoded approximates)
   4. User-supplied manual rate on transaction entry
 
+Stored rates are retained indefinitely: get_stored_rate() is called with
+for_date for backdated transactions, so historical rows stay functionally
+useful long after they leave the 7-day stale window. Do not prune them.
+
 Disabling auto-fetch (e.g. via a config flag) is possible but not yet implemented.
-If added in future, note that DEFAULT_RATES in FinancialEngine covers only 9 currencies —
-families using currencies outside that list (OMR, SAR, etc.) would get silent 1.0
-fallbacks, causing incorrect dashboard totals and transaction conversions.
+If added in future, note that DEFAULT_RATES in FinancialEngine covers a fixed
+hardcoded set of currencies — families using currencies outside that list would
+get 1.0 fallbacks (now logged as warnings), causing incorrect dashboard totals
+and transaction conversions.
 """
 
 import logging
@@ -227,21 +232,6 @@ def fetch_family_rates(db: Session, family: models.Family) -> int:
     return count
 
 
-RATE_RETENTION_DAYS = 14  # Anything older than the stale window (7d) has no functional use
-
-
-def _prune_old_rates(db: Session) -> int:
-    """Delete exchange rate rows older than RATE_RETENTION_DAYS. Returns count deleted."""
-    cutoff = date.today() - timedelta(days=RATE_RETENTION_DAYS)
-    deleted = (
-        db.query(models.ExchangeRate)
-        .filter(models.ExchangeRate.valid_date < cutoff)
-        .delete(synchronize_session=False)
-    )
-    db.commit()
-    return deleted
-
-
 def fetch_all_family_rates() -> None:
     """APScheduler entry point — runs for every active family."""
     db = SessionLocal()
@@ -259,10 +249,6 @@ def fetch_all_family_rates() -> None:
             except Exception as exc:
                 log.error("Rate fetch failed for family %s: %s", family.id, exc)
         log.info("Exchange rate fetch complete: %d pairs updated across %d families", total, len(families))
-
-        pruned = _prune_old_rates(db)
-        if pruned:
-            log.info("Exchange rate pruning: removed %d rows older than %d days", pruned, RATE_RETENTION_DAYS)
     finally:
         db.close()
 

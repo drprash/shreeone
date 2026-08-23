@@ -123,6 +123,9 @@ def check_account_access(user: models.User, account: models.Account) -> bool:
 
 def check_transaction_access(user: models.User, transaction: models.Transaction) -> bool:
     """Check if user can view/modify a transaction"""
+    account = transaction.account
+    if account is None or account.family_id != user.family_id:
+        return False
     if user.role == models.Role.ADMIN:
         return True
     if transaction.created_by_user_id == user.id:

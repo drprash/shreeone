@@ -1,9 +1,12 @@
+import logging
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, case, or_
 from app import models, schemas
+
+log = logging.getLogger(__name__)
 
 class FinancialEngine:
     # Default exchange rates relative to USD (1 unit of currency = X USD)
@@ -98,6 +101,13 @@ class FinancialEngine:
                 pass  # Fall through to DEFAULT_RATES
 
         # 2. DEFAULT_RATES fallback
+        for currency in (from_currency, to_currency):
+            if currency not in FinancialEngine.DEFAULT_RATES:
+                log.warning(
+                    "No exchange rate available for %s (%s→%s) — falling back to 1.0. "
+                    "Converted amounts will be wrong until a rate is stored.",
+                    currency, from_currency, to_currency,
+                )
         from_rate = FinancialEngine.DEFAULT_RATES.get(from_currency, Decimal('1.0'))
         to_rate = FinancialEngine.DEFAULT_RATES.get(to_currency, Decimal('1.0'))
 
@@ -127,58 +137,62 @@ class FinancialEngine:
 
         is_liability = account.type in models.LIABILITY_ACCOUNT_TYPES
 
-        # Use amount_in_base_currency so cross-currency transactions (e.g. USD tx on
-        # an AED account) are correctly converted rather than treated as account-currency.
-        if is_liability:
-            income_amount = -models.Transaction.amount_in_base_currency
-            expense_amount = models.Transaction.amount_in_base_currency
-            transfer_source_amount = models.Transaction.amount_in_base_currency
-            transfer_target_amount = -models.Transaction.amount_in_base_currency
-        else:
-            income_amount = models.Transaction.amount_in_base_currency
-            expense_amount = -models.Transaction.amount_in_base_currency
-            transfer_source_amount = -models.Transaction.amount_in_base_currency
-            transfer_target_amount = models.Transaction.amount_in_base_currency
-
-        # Sum all transactions (result is in family base currency)
-        result = db.query(
-            func.sum(
-                case(
-                    (models.Transaction.type == models.TransactionType.INCOME, income_amount),
-                    (models.Transaction.type == models.TransactionType.EXPENSE, expense_amount),
-                    (models.Transaction.type == models.TransactionType.TRANSFER,
-                        case(
-                            (models.Transaction.is_source_transaction == True, transfer_source_amount),
-                            (models.Transaction.is_source_transaction == False, transfer_target_amount),
-                            else_=Decimal('0')
-                        )
-                    ),
-                    else_=Decimal('0')
-                )
+        def signed_amount(col):
+            """Apply the income/expense/transfer sign convention to an amount column."""
+            if is_liability:
+                income_amount, expense_amount = -col, col
+                transfer_source_amount, transfer_target_amount = col, -col
+            else:
+                income_amount, expense_amount = col, -col
+                transfer_source_amount, transfer_target_amount = -col, col
+            return case(
+                (models.Transaction.type == models.TransactionType.INCOME, income_amount),
+                (models.Transaction.type == models.TransactionType.EXPENSE, expense_amount),
+                (models.Transaction.type == models.TransactionType.TRANSFER,
+                    case(
+                        (models.Transaction.is_source_transaction == True, transfer_source_amount),
+                        (models.Transaction.is_source_transaction == False, transfer_target_amount),
+                        else_=Decimal('0')
+                    )
+                ),
+                else_=Decimal('0')
             )
+
+        # Transactions denominated in the account's own currency are summed
+        # natively so the balance never drifts with exchange-rate changes.
+        # Cross-currency transactions are carried in base currency and
+        # converted to the account currency at the current rate below.
+        native_sum, cross_base_sum = db.query(
+            func.sum(case(
+                (models.Transaction.currency == account.currency,
+                 signed_amount(models.Transaction.amount)),
+                else_=Decimal('0')
+            )),
+            func.sum(case(
+                (models.Transaction.currency != account.currency,
+                 signed_amount(models.Transaction.amount_in_base_currency)),
+                else_=Decimal('0')
+            )),
         ).filter(
             models.Transaction.account_id == account_id,
             models.Transaction.deleted_at.is_(None)
-        ).scalar()
+        ).one()
 
-        result_in_base = result or Decimal('0')
-        opening_balance = account.opening_balance or Decimal('0')
+        balance = (account.opening_balance or Decimal('0')) + (native_sum or Decimal('0'))
 
-        family = db.query(models.Family).filter(models.Family.id == account.family_id).first()
-        base_currency = family.base_currency if family else account.currency
+        cross_base_sum = cross_base_sum or Decimal('0')
+        if cross_base_sum:
+            family = db.query(models.Family).filter(models.Family.id == account.family_id).first()
+            base_currency = family.base_currency if family else account.currency
+            if account.currency == base_currency:
+                balance += cross_base_sum
+            else:
+                base_to_acc = FinancialEngine.get_exchange_rate(
+                    db, base_currency, account.currency, family_id=account.family_id
+                )
+                balance += cross_base_sum * base_to_acc
 
-        if account.currency == base_currency:
-            return opening_balance + result_in_base
-
-        # opening_balance is in account currency; convert to base, sum, convert back
-        acc_to_base = FinancialEngine.get_exchange_rate(
-            db, account.currency, base_currency, family_id=account.family_id
-        )
-        base_to_acc = FinancialEngine.get_exchange_rate(
-            db, base_currency, account.currency, family_id=account.family_id
-        )
-        opening_in_base = opening_balance * acc_to_base
-        return (opening_in_base + result_in_base) * base_to_acc
+        return balance
 
     @staticmethod
     def update_account_balance(db: Session, account_id: str):
@@ -190,6 +204,37 @@ class FinancialEngine:
             new_balance = FinancialEngine.calculate_account_balance(db, account_id)
             account.current_balance = new_balance
             db.commit()
+
+    @staticmethod
+    def validate_category(
+        db: Session,
+        family_id,
+        tx_type: models.TransactionType,
+        category_id,
+    ) -> None:
+        """Ensure a transaction's category belongs to the family and matches
+        the transaction type. Raises ValueError on any violation."""
+        if category_id is None:
+            return
+        if tx_type == models.TransactionType.TRANSFER:
+            raise ValueError("Transfers cannot have a category")
+        category = db.query(models.Category).filter(
+            models.Category.id == category_id,
+            models.Category.family_id == family_id,
+            models.Category.deleted_at.is_(None),
+        ).first()
+        if not category:
+            raise ValueError("Category not found")
+        expected = (
+            models.CategoryType.INCOME
+            if tx_type == models.TransactionType.INCOME
+            else models.CategoryType.EXPENSE
+        )
+        if category.type != expected:
+            raise ValueError(
+                f"Category type {category.type.value} does not match "
+                f"transaction type {tx_type.value}"
+            )
 
     @staticmethod
     def process_transaction(
@@ -209,7 +254,11 @@ class FinancialEngine:
         
         if not account:
             raise ValueError("Account not found")
-        
+
+        FinancialEngine.validate_category(
+            db, user.family_id, transaction_data.type, transaction_data.category_id
+        )
+
         # Calculate amount in base currency
         base_currency = user.family.base_currency
         exchange_rate = transaction_data.exchange_rate_to_base
@@ -552,7 +601,9 @@ class FinancialEngine:
         total_credit = Decimal('0')
         
         for account in accounts:
-            if not account.include_in_family_overview and user.role != models.Role.ADMIN:
+            # Excluded accounts stay out of family totals for everyone so the
+            # net worth tile matches the snapshot chart (which also skips them)
+            if not account.include_in_family_overview:
                 continue
 
             balance = FinancialEngine.calculate_account_balance(db, str(account.id))

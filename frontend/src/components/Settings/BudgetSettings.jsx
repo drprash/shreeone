@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import settingsAPI from '../../services/settingsAPI';
 import api from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
+import { formatCurrency } from '../../utils/formatters';
 
 const BudgetSettings = () => {
   const user = useAuthStore((state) => state.user);
@@ -9,6 +10,7 @@ const BudgetSettings = () => {
   const [categories, setCategories] = useState([]);
   const [members, setMembers] = useState([]);
   const [showBudgetAlerts, setShowBudgetAlerts] = useState(true);
+  const [baseCurrency, setBaseCurrency] = useState('USD');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -36,6 +38,7 @@ const BudgetSettings = () => {
         settingsAPI.getBudgets(),
         api.get('/categories/'),
         settingsAPI.getPreferences(),
+        settingsAPI.getFamilyProfile(),
       ];
 
       // Only fetch members list if user is admin (needed for displaying member names)
@@ -48,9 +51,10 @@ const BudgetSettings = () => {
       setBudgets(responses[0].data);
       setCategories(responses[1].data.filter(c => c.type === 'EXPENSE'));
       setShowBudgetAlerts(responses[2].data.show_budget_alerts ?? true);
+      setBaseCurrency(responses[3].data.base_currency || 'USD');
 
       if (user?.role === 'ADMIN') {
-        setMembers(responses[3].data);
+        setMembers(responses[4].data);
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load budgets');
@@ -242,8 +246,8 @@ const BudgetSettings = () => {
 
                 <div className="mb-3">
                   <div className="flex justify-between text-sm mb-1">
-                    <span className="text-slate-600">Spent: ₹{parseFloat(budget.spent_amount).toFixed(2)}</span>
-                    <span className="font-semibold">${parseFloat(budget.limit_amount).toFixed(2)}</span>
+                    <span className="text-slate-600">Spent: {formatCurrency(budget.spent_amount, baseCurrency)}</span>
+                    <span className="font-semibold">{formatCurrency(budget.limit_amount, baseCurrency)}</span>
                   </div>
                   <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                     <div

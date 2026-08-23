@@ -371,6 +371,18 @@ def complete_onboarding(
     return schemas.UserResponse.model_validate(current_user)
 
 
+@router.post("/checklist-dismiss", response_model=schemas.UserResponse)
+def dismiss_setup_checklist(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    """Persist that the user dismissed the getting-started checklist."""
+    current_user.setup_checklist_dismissed = True
+    db.commit()
+    db.refresh(current_user)
+    return schemas.UserResponse.model_validate(current_user)
+
+
 # ============ WebAuthn / Biometric ============
 
 @router.post("/webauthn/register/begin")

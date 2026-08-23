@@ -15,7 +15,9 @@ def _apply_schema_migrations():
     """Run all idempotent ALTER TABLE and CREATE TABLE IF NOT EXISTS statements."""
     statements = [
         "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE",        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS country_code VARCHAR(2)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_checklist_dismissed BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS country_code VARCHAR(2)",
         "ALTER TABLE accounts DROP COLUMN IF EXISTS current_value",
         "ALTER TABLE accounts DROP COLUMN IF EXISTS last_valued_at",
         "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS show_net_worth_by_country BOOLEAN NOT NULL DEFAULT TRUE",

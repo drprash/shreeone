@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PlayCircle } from 'lucide-react';
 import { replayOnboardingTour } from '../hooks/useOnboarding';
 import MemberManagement from '../components/Settings/MemberManagement';
@@ -13,11 +13,21 @@ import BackupRestore from '../components/Settings/BackupRestore';
 import { useAuthStore } from '../store/authStore';
 import settingsAPI from '../services/settingsAPI';
 
+const VALID_TABS = ['family', 'members', 'backup', 'currencies', 'budget', 'recurring', 'security'];
+const ADMIN_ONLY_TABS = ['members', 'backup'];
+
 const Settings = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('family');
+  const [searchParams] = useSearchParams();
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === 'ADMIN';
+
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = searchParams.get('tab');
+    if (!requested || !VALID_TABS.includes(requested)) return 'family';
+    if (ADMIN_ONLY_TABS.includes(requested) && user?.role !== 'ADMIN') return 'family';
+    return requested;
+  });
 
   const handleReplayTour = () => {
     navigate('/');

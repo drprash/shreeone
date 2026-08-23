@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import QuickAdd from './QuickAdd';
 
+// Dispatched (e.g. by the getting-started checklist) to open the form remotely
+export const OPEN_QUICK_ADD_EVENT = 'shreeone-open-quick-add';
+
 const FloatingAddTransactionButton = ({ accounts, categories, baseCurrency, defaultAccountId }) => {
   const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const open = () => setIsOpen(true);
+    window.addEventListener(OPEN_QUICK_ADD_EVENT, open);
+    return () => window.removeEventListener(OPEN_QUICK_ADD_EVENT, open);
+  }, []);
 
   return (
     <>

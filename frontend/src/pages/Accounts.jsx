@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
@@ -44,9 +44,19 @@ const COUNTRIES = [
 
 const Accounts = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Deep-link from the getting-started checklist: open the create modal on arrival
+  useEffect(() => {
+    if (location.state?.openCreate) {
+      setShowCreateModal(true);
+      // Clear the flag so refresh/back doesn't reopen the modal
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
   const [showEditModal, setShowEditModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editingAccount, setEditingAccount] = useState(null);

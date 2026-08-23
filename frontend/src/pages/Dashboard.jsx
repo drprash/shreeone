@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Wallet, Plus } from 'lucide-react';
 import api from '../services/api';
 import SummaryCards from '../components/Dashboard/SummaryCards';
+import GettingStartedChecklist from '../components/Dashboard/GettingStartedChecklist';
 import RecentTransactions from '../components/Dashboard/RecentTransactions';
 import FloatingAddTransactionButton from '../components/Transactions/FloatingAddTransactionButton';
 import { useAuthStore } from '../store/authStore';
@@ -100,7 +101,16 @@ const Dashboard = () => {
         <NarrativeBanner />
       </React.Suspense>
 
-      {accounts?.length === 0 ? (
+      {isAdmin && (
+        <GettingStartedChecklist
+          accounts={accounts}
+          dashboardData={dashboardData}
+          familyMembers={familyMembers}
+        />
+      )}
+
+      {/* The checklist covers the zero-account case for admins unless dismissed */}
+      {accounts?.length === 0 && isAdmin && user?.setup_checklist_dismissed !== true ? null : accounts?.length === 0 ? (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-10 text-center">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-900/40 flex items-center justify-center mb-4">
             <Wallet className="w-8 h-8 text-blue-600 dark:text-blue-400" />

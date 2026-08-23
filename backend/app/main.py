@@ -44,7 +44,9 @@ def ensure_performance_indexes():
     with engine.begin() as connection:
         performance_indexes = [
             "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE",            "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS country_code VARCHAR(2)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_checklist_dismissed BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS country_code VARCHAR(2)",
             "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS show_net_worth_by_country BOOLEAN NOT NULL DEFAULT TRUE",
             "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS show_member_spending BOOLEAN NOT NULL DEFAULT TRUE",
             "ALTER TABLE family_preferences ADD COLUMN IF NOT EXISTS ai_categorization_enabled BOOLEAN NOT NULL DEFAULT TRUE",

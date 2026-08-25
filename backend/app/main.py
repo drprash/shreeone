@@ -157,6 +157,17 @@ def _build_period_summary(db, family, start_date, end_date):
     return ai_service.build_period_summary(db, family, start_date, end_date)
 
 
+def _narrative_exists(db, family_id, narrative_type, period_label):
+    """True if an undismissed narrative for this period already exists (e.g. generated manually)."""
+    from app import models as app_models
+    return db.query(app_models.AINarrative).filter(
+        app_models.AINarrative.family_id == family_id,
+        app_models.AINarrative.narrative_type == narrative_type,
+        app_models.AINarrative.period_label == period_label,
+        app_models.AINarrative.dismissed_at.is_(None),
+    ).first() is not None
+
+
 def record_net_worth_snapshot_task():
     """Daily at 03:00 — record a net worth snapshot for each family."""
     db = SessionLocal()
@@ -236,9 +247,6 @@ def record_net_worth_snapshot_task():
 
 def generate_goal_narratives_task():
     """Weekly on Monday 09:00 — AI goal recommendations for each family."""
-    if not ai_service.is_available():
-        print(f"[{datetime.utcnow()}] AI service unavailable — skipping goal narratives")
-        return
     db = SessionLocal()
     try:
         from app import models as app_models
@@ -258,6 +266,11 @@ def generate_goal_narratives_task():
                 app_models.FamilyPreference.family_id == family.id
             ).first()
             if prefs and not getattr(prefs, "ai_services_enabled", True):
+                continue
+            # Availability must be checked per family: provider resolution honours
+            # family_preferences.ai_provider before the server env default.
+            if not ai_service.is_available(family_id=family.id, db=db):
+                print(f"[{datetime.utcnow()}] AI unavailable for family {family.id} — skipping goal narrative")
                 continue
 
             # Latest net worth snapshot
@@ -297,7 +310,9 @@ def generate_goal_narratives_task():
             )
 
             # Reuse generate_monthly_narrative with a custom prompt via ai_service
-            content = ai_service.generate_monthly_narrative({"_raw_prompt": prompt, **summary})
+            content = ai_service.generate_monthly_narrative(
+                {"_raw_prompt": prompt, **summary}, family_id=family.id, db=db
+            )
             if content:
                 narrative = app_models.AINarrative(
                     family_id=family.id,
@@ -319,9 +334,6 @@ def generate_goal_narratives_task():
 
 def generate_monthly_narratives_task():
     """Generate AI monthly narrative for each family (runs 1st of month at 02:00)."""
-    if not ai_service.is_available():
-        print(f"[{datetime.utcnow()}] AI service unavailable — skipping monthly narratives")
-        return
     db = SessionLocal()
     try:
         from app import models as app_models
@@ -349,6 +361,13 @@ def generate_monthly_narratives_task():
             ).first()
             if prefs and (not getattr(prefs, "ai_services_enabled", True) or not getattr(prefs, "ai_monthly_narrative_enabled", True)):
                 continue
+            # Availability must be checked per family: provider resolution honours
+            # family_preferences.ai_provider before the server env default.
+            if not ai_service.is_available(family_id=family.id, db=db):
+                print(f"[{datetime.utcnow()}] AI unavailable for family {family.id} — skipping monthly narrative")
+                continue
+            if _narrative_exists(db, family.id, "MONTHLY", period_label):
+                continue  # already generated (e.g. manually) for this period
             period_data = _build_period_summary(db, family, start_date, end_date)
             if period_data is None:
                 continue  # no transactions — skip rather than generate empty narrative
@@ -358,7 +377,7 @@ def generate_monthly_narratives_task():
                 "base_currency": family.base_currency,
                 **period_data,
             }
-            content = ai_service.generate_monthly_narrative(summary)
+            content = ai_service.generate_monthly_narrative(summary, family_id=family.id, db=db)
             if content:
                 narrative = app_models.AINarrative(
                     family_id=family.id,
@@ -379,9 +398,6 @@ def generate_monthly_narratives_task():
 
 def generate_weekly_digests_task():
     """Generate AI weekly digest for each family (runs every Monday at 08:00)."""
-    if not ai_service.is_available():
-        print(f"[{datetime.utcnow()}] AI service unavailable — skipping weekly digests")
-        return
     db = SessionLocal()
     try:
         from app import models as app_models
@@ -403,6 +419,13 @@ def generate_weekly_digests_task():
             ).first()
             if prefs and (not getattr(prefs, "ai_services_enabled", True) or not getattr(prefs, "ai_weekly_digest_enabled", True)):
                 continue
+            # Availability must be checked per family: provider resolution honours
+            # family_preferences.ai_provider before the server env default.
+            if not ai_service.is_available(family_id=family.id, db=db):
+                print(f"[{datetime.utcnow()}] AI unavailable for family {family.id} — skipping weekly digest")
+                continue
+            if _narrative_exists(db, family.id, "WEEKLY", period_label):
+                continue  # already generated (e.g. manually) for this period
             period_data = _build_period_summary(db, family, start_date, end_date)
             if period_data is None:
                 continue  # no transactions this week — skip
@@ -413,7 +436,7 @@ def generate_weekly_digests_task():
                 "total_spent": period_data["total_expenses"],
                 "top_categories": period_data["top_categories"],
             }
-            content = ai_service.generate_weekly_digest(summary)
+            content = ai_service.generate_weekly_digest(summary, family_id=family.id, db=db)
             if content:
                 narrative = app_models.AINarrative(
                     family_id=family.id,

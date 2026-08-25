@@ -55,7 +55,7 @@ ShreeOne is a self-hosted web app that runs entirely on your own server or home 
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic v2 |
 | Auth | JWT (30 min access / 7 day refresh) + WebAuthn passkeys |
 | Database | PostgreSQL 16 |
-| Scheduler | APScheduler (recurring payments at 00:00, token pruning at 01:00, exchange rates at 06:00) |
+| Scheduler | APScheduler — 7 daily/weekly/monthly jobs: recurring payments (00:00), token pruning (01:00), net worth snapshot (03:00), exchange rates (06:00), AI monthly narrative (1st @ 02:00), AI weekly digest (Mon @ 08:00), AI goal narratives (Mon @ 09:00) |
 | AI | Ollama + Gemma 4 E4B (local, `--profile ollama`) or OpenAI / Anthropic / Google (cloud); master toggle + per-provider test in Settings |
 | PDF/OCR | pdfplumber (text PDFs), pymupdf (scanned image fallback) |
 | Infrastructure | Docker + Docker Compose, Nginx |
@@ -174,6 +174,7 @@ Open Chrome → navigate to the app URL → three-dot menu → **Add to Home scr
 | `LLM_PROVIDER` | No | `local` | AI provider: `local` (Ollama), `openai`, `anthropic`, `google` |
 | `OPENAI_API_KEY` | No | — | OpenAI API key |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | OpenAI model name |
+| `OPENAI_BASE_URL` | No | — | Override endpoint for OpenAI-compatible APIs (Azure OpenAI, Groq, Together.ai) |
 | `ANTHROPIC_API_KEY` | No | — | Anthropic API key |
 | `ANTHROPIC_MODEL` | No | `claude-haiku-4-5-20251001` | Anthropic model name |
 | `GOOGLE_AI_API_KEY` | No | — | Google AI API key |
@@ -209,7 +210,7 @@ shreeone/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                 # FastAPI app, scheduler, CORS
-│   │   ├── models.py               # SQLAlchemy models (16 tables)
+│   │   ├── models.py               # SQLAlchemy models (20 tables)
 │   │   ├── schemas.py              # Pydantic request/response schemas
 │   │   ├── crud.py
 │   │   ├── auth.py                 # JWT + WebAuthn
@@ -217,7 +218,7 @@ shreeone/
 │   │   ├── exchange_rate_service.py# ECB + FloatRates exchange rate fetching
 │   │   ├── recurring_processor.py  # Recurring payment auto-posting
 │   │   ├── config.py
-│   │   └── routers/                # auth, accounts, transactions, categories, dashboard, settings, sync, admin, backup
+│   │   └── routers/                # auth, accounts, transactions, categories, goals, dashboard, stats, settings, sync, admin, backup, ai
 │   ├── tests/
 │   ├── requirements.txt
 │   └── Dockerfile

@@ -450,6 +450,46 @@ case "${ai_choice:-3}" in
         fi
         echo ""
 
+        if [[ ${#CONFIGURED_PROVIDERS[@]} -eq 0 ]]; then
+            warn "  No API keys entered. Skipping cloud AI."
+            info "  To add providers later, edit .env and restart."
+        else
+            {
+                echo ""
+                echo "# ── Cloud AI ────────────────────────────────────────────────────────────────"
+                if [[ -n "${OPENAI_KEY:-}" ]]; then
+                    echo "OPENAI_API_KEY=${OPENAI_KEY}"
+                    echo "OPENAI_MODEL=${OPENAI_MODEL_VAL:-gpt-4o-mini}"
+                fi
+                if [[ -n "${ANTHROPIC_KEY:-}" ]]; then
+                    echo "ANTHROPIC_API_KEY=${ANTHROPIC_KEY}"
+                    echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL_VAL:-claude-haiku-4-5-20251001}"
+                fi
+                if [[ -n "${GOOGLE_KEY:-}" ]]; then
+                    echo "GOOGLE_AI_API_KEY=${GOOGLE_KEY}"
+                    echo "GOOGLE_AI_MODEL=${GOOGLE_MODEL_VAL:-gemini-2.0-flash}"
+                fi
+                # Set LLM_PROVIDER to the first configured cloud provider so the backend
+                # doesn't fall back to the local Ollama default when cloud keys are present.
+                if [[ -n "${OPENAI_KEY:-}" ]]; then
+                    echo "LLM_PROVIDER=openai"
+                elif [[ -n "${ANTHROPIC_KEY:-}" ]]; then
+                    echo "LLM_PROVIDER=anthropic"
+                elif [[ -n "${GOOGLE_KEY:-}" ]]; then
+                    echo "LLM_PROVIDER=google"
+                fi
+            } >> "$ENV_FILE"
+            ENABLE_AI=cloud
+            success "Cloud AI configured: ${CONFIGURED_PROVIDERS[*]}"
+        fi
+        ;;
+    *)
+        info "Skipping AI features."
+        info "To enable later: add AI vars to .env, or run:  ${COMPOSE_CMD} --profile ollama up -d"
+        ;;
+esac
+echo ""
+
 info "Running: ${COMPOSE_CMD} up -d --build"
 info "On the first run this can take 5–10 minutes (downloading images and compiling). Please wait..."
 echo ""
